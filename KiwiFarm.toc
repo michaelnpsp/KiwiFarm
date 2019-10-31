@@ -1,7 +1,10 @@
 ## Interface: 11302
-## Title: |cFF7FFF72Kiwi|r Farm Classic
+## Title: |cFF7FFF72Kiwi|r Farm
 ## Notes: Instances Reset & Gold Tracker Classic
 ## Author: Michael
 ## SavedVariables: KiwiFarmDB
+
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
 
 KiwiFarm.lua

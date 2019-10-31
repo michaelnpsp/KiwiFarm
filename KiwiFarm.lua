@@ -12,10 +12,10 @@ local floor = math.floor
 local band = bit.band
 local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
 local IsInInstance = IsInInstance
+local GetZoneText = GetZoneText
 
 local config
 local resets
-local lockspent
 
 -- main frame
 local addon = CreateFrame('Frame', "KiwiFarm", UIParent)
@@ -50,11 +50,10 @@ local function FmtMoney(money)
 	return string.format( "%d|cffffd70ag|r %d|cffc7c7cfs|r %d|cffeda55fc|r", gold, silver, copper)
 end
 
-local function RegisterMoney(money)
+local function RegMoney(money)
 	local key = floor( time() / 86400 )
 	config.daily[key] = (config.daily[key] or 0) + money
 end
-
 
 -- update text
 local function RefreshText()
@@ -67,28 +66,30 @@ local function RefreshText()
 	local timeLast  = resets[#resets]
 	local timeLock  = #resets>0 and resets[1]+3600 or nil
 	local remain    = RESET_MAX-#resets
+	local remainC   = remain>0 and '|cFF00ff00' or '|cFFff0000'
 	-- time of last reset in last hour, or if there are no resets time when the instance was marked as modified (some mob killed)
-	local sReset = (timeLast and curtime-timeLast) or (lockspent and curtime-lockspent) or 0
+	local sReset = (timeLast and curtime-timeLast) or (config.lockspent and curtime-config.lockspent) or 0
 	local m1, s1 = floor(sReset/60), sReset%60
 	-- unlock time
 	local sUnlock = timeLock and timeLock-curtime or 0
 	local m2, s2 = floor(sUnlock/60), sUnlock%60
 	-- locked info
-	local locked = remain<=0 and (sUnlock>60*5 and '|cFFff0000' or '|cFFff8000') or ''
-	local spent  = lockspent and '|cFFff8000' or '|cFF00ff00'
+	local lockedC = remain<=0 and (sUnlock>60*5 and '|cFFff0000' or '|cFFff8000') or ''
+	local spentC  = config.lockspent and '|cFFff8000' or '|cFF00ff00'
 	-- session duration
 	local sSession = curtime - (config.sessionStart or curtime) + (config.sessionDuration or 0)
 	local m0, s0 = floor(sSession/60), sSession%60
+	local sessionC = config.sessionStart and '|cFF00ff00' or '|cFFff0000'
 	-- money info
 	local mTotal = config.moneyCash+config.moneyItems
 	local mTotalHour = sSession>0 and floor(mTotal*3600/sSession) or 0
 	-- create display text
 	text:SetFormattedText(
-		"\n%dm %ds\n%s%dm %ds|r\n%d\n%s%dm %ds\n%s\n%s\n%s\n%s",
-		m0,s0,spent,m1,s1,remain,locked,m2,s2,FmtMoney(config.moneyCash),FmtMoney(config.moneyItems),FmtMoney(mTotal), FmtMoney(mTotalHour)
+		"|cFF7FFF72%s|r\n%s%dm %ds|r\n%s%dm %ds|r\n%s%d|r\n%s%dm %ds|r\n%s\n%s\n%s\n%s",
+		GetZoneText(), sessionC,m0,s0, spentC,m1,s1, remainC,remain, lockedC,m2,s2, FmtMoney(config.moneyCash),FmtMoney(config.moneyItems),FmtMoney(mTotal), FmtMoney(mTotalHour)
 	)
 	-- update timer status
-	local stopped = #resets==0 and not lockspent and not config.sessionStart
+	local stopped = #resets==0 and not config.lockspent and not config.sessionStart
 	if stopped ~= not timer:IsPlaying() then
 		if stopped then
 			timer:Stop()
@@ -102,18 +103,25 @@ end
 local function AddReset()
 	local curtime = time()
 	if curtime-(resets[#resets] or 0)>3 then -- ignore reset of additional instances
-		lockspent = nil
+		config.lockspent = nil
 		table.insert( resets, curtime )
-		RefreshText()
+		if addon:IsVisible() then
+			RefreshText()
+		end
 	end
 end
 
 -- session start
-local function SessionStart()
-	if not config.sessionStart then
-		config.sessionStart = time()
-		config.moneyCash  = config.moneyCash or 0
+local function SessionStart(force)
+	if not config.sessionStart or force==true then
+		config.sessionStart = config.sessionStart or time()
+		config.moneyCash = config.moneyCash or 0
 		config.moneyItems = config.moneyItems or 0
+		addon:RegisterEvent("CHAT_MSG_LOOT")
+		addon:RegisterEvent("CHAT_MSG_MONEY")
+		if not config.lockspent and IsInInstance() then
+			addon:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+		end
 		RefreshText()
 	end
 end
@@ -124,6 +132,11 @@ local function SessionStop()
 		local curtime = time()
 		config.sessionDuration = (config.sessionDuration or 0) + (curtime - (config.sessionStart or curtime))
 		config.sessionStart = nil
+		addon:UnregisterEvent("CHAT_MSG_LOOT")
+		addon:UnregisterEvent("CHAT_MSG_MONEY")
+		if not config.lockspent and IsInInstance() then
+			addon:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+		end
 	end
 end
 
@@ -138,17 +151,11 @@ end
 
 -- main frame becomes visible
 addon:SetScript("OnShow", function(self)
-	self:RegisterEvent("CHAT_MSG_SYSTEM")
-	self:RegisterEvent("CHAT_MSG_LOOT")
-	self:RegisterEvent("CHAT_MSG_MONEY")
 	RefreshText()
 end)
 
 -- main frame becomes invisible
 addon:SetScript("OnHide", function(self)
-	self:UnregisterEvent("CHAT_MSG_SYSTEM")
-	self:UnregisterEvent("CHAT_MSG_LOOT")
-	self:UnregisterEvent("CHAT_MSG_MONEY")
 end)
 
 -- shift+mouse click to reset instances
@@ -157,8 +164,6 @@ addon:SetScript("OnMouseUp", function(self, button)
 		addon:ShowMenu()
 	elseif IsShiftKeyDown() then -- reset instances data
 		ResetInstances()
-	elseif IsControlKeyDown() then -- reset session
-		SessionReset()
 	end
 end)
 
@@ -181,11 +186,13 @@ function addon:CHAT_MSG_LOOT(event,msg)
 			itemLink = strmatch(msg, PATTERN_LOOTS)
 		end
 		if itemLink then
-			local price = select( 11, GetItemInfo(itemLink) ) or 0
-			local money = price*quantity
+			local name, link, rarity, level, minLevel, typ, subTyp, stackCount, equipLoc, icon, price = GetItemInfo(itemLink)
+			local money = (price or 0)*quantity
 			config.moneyItems = config.moneyItems + money
-			RegisterMoney(money)
-			print("Item Price:", FmtMoney(price), quantity, itemLink)
+			RegMoney(money)
+			if rarity>=2 then -- display only green or superior
+				print("KiwiFarm looted: ", FmtMoney(money), itemLink )
+			end
 		end
 	end
 end
@@ -198,58 +205,50 @@ do
 		if config.sessionStart then
 			wipe(digits)
 			msg:gsub("%d+",func)
-			local copper
-			if #digits==3 then -- gold + silver + copper
-				copper = digits[1]*10000+digits[2]*100+digits[3]
-			elseif #digits == 2 then -- siver + copper
-				copper = digits[1]*100+digits[2]
-			else -- copper
-				copper = digits[1]
-			end
+			local copper = digits[#digits] + (digits[#digits-1] or 0)*100 + (digits[#digits-2] or 0)*10000
 			config.moneyCash = config.moneyCash + copper
-			RegisterMoney(copper)
-			print("Money Gained:", FmtMoney(copper))
+			RegMoney(copper)
 		end
 	end
 end
 
 -- zones management
 function addon:ZONE_CHANGED_NEW_AREA()
-	if not config.disabled and (not config.zones or config.zones[GetZoneText()]) then
-		local ins,typ = IsInInstance()
-		if ins then
-			if not config.sessionStart then -- session start time
+	local ins,typ = IsInInstance()
+	if ins and #resets>=RESET_MAX then -- locked but inside instance, means locked expired before estimated unlock time
+		table.remove(resets,1)
+	end
+	if config.zones then
+		if config.zones[GetZoneText()] then
+			if ins then
 				SessionStart()
 			end
-			if #resets>=RESET_MAX then -- locked but inside instance, means locked expired before estimated unlock time
-				table.remove(resets,1)
-			end
-			if not lockspent and typ=='party' then
-				self:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
-			end
-		elseif not lockspent then
-			self:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+			self:Show()
+		elseif addon:IsVisible() then
+			self:Hide()
 		end
-		self:Show()
-	elseif addon:IsVisible() then
-		self:Hide()
-		self:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+	end
+	if config.sessionStart and not config.lockspent then
+		if not ins then
+			self:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+		elseif typ=='party' then
+			self:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+		end
 	end
 end
 
--- save hidden reset on player logout
+-- stop session and register automatic reset on player logout
 do
 	local isLogout
 	hooksecurefunc("Logout", function() isLogout=true end)
 	hooksecurefunc("Quit",   function() isLogout=true end)
 	hooksecurefunc("CancelLogout", function() isLogout=nil end)
 	function addon:PLAYER_LOGOUT()
-		if lockspent then
-			if isLogout then -- logout
+		if isLogout then
+			if config.lockspent then
 				AddReset()
-			else -- reload ui
-				config.lockspent = lockspent
 			end
+			SessionStop()
 		end
 	end
 end
@@ -259,7 +258,7 @@ end
 function addon:COMBAT_LOG_EVENT_UNFILTERED()
 	local _, eventType,_,_,_,_,_,dstGUID,_,dstFlags = CombatLogGetCurrentEventInfo()
 	if eventType == 'UNIT_DIED' and band(dstFlags,COMBATLOG_OBJECT_CONTROL_NPC)~=0 and IsInInstance() then
-		lockspent = time()
+		config.lockspent = time()
 		addon:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
 		timer:Play()
 	end
@@ -287,14 +286,15 @@ local function LayoutFrame()
 	text0:SetJustifyH('LEFT')
 	text0:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
 	text0:SetText(nil)
-	text0:SetText( "|cFFa0a0ffKiwi Farm:|r\nSession Duration:\nLast Reset:\nRemaining:\nLocked:\nCurrency:\nItems:\nTotal:\nTotal (per hour):" )
+	text0:SetText( "|cFF7FFF72Kiwi Farm:|r\nSession duration:\nLast reset:\nRemaining:\nLocked:\nCurrency:\nItems:\nTotal:\nTotal (per hour):" )
 	-- main frame size
 	addon:SetHeight( text0:GetHeight() + MARGIN*2 )
-	addon:SetWidth( text0:GetWidth() * 1.6 + MARGIN*2 )
+	addon:SetWidth( text0:GetWidth() * 1.8 + MARGIN*2 )
 end
 
 -- initialize
 local function Initialize()
+	-- database
 	local serverKey = GetRealmName()
 	local root = KiwiFarmDB
 	if not root then
@@ -304,22 +304,43 @@ local function Initialize()
 	if not config then
 		config = { resets = {} }; root[serverKey] = config
 	end
-	config.backColor = config.backColor or { 0,0,0,0 }
+	config.backColor = config.backColor or { 0,0,0,.4 }
 	config.daily = config.daily or {}
 	config.moneyCash  = config.moneyCash or 0
 	config.moneyItems = config.moneyItems  or 0
+	config.minimapIcon = config.minimapIcon or { hide = false }
  	resets = config.resets
-	lockspent = config.lockspent -- only to save lockspent variable between reloads
-	config.lockspent = nil
+	-- minimap icon
+	LibStub("LibDBIcon-1.0"):Register(addonName, LibStub("LibDataBroker-1.1"):NewDataObject(addonName, {
+		type  = "launcher",
+		label = GetAddOnInfo( addonName, "Title"),
+		icon  = "Interface\\AddOns\\KiwiFarm\\KiwiFarm",
+		OnClick = function(self, button)
+			if button == 'RightButton' then
+				addon:ShowMenu()
+			else
+				addon:SetShown( not addon:IsVisible() )
+			end
+		end,
+		OnTooltipShow = function(tooltip)
+			tooltip:AddLine("Kiwi Farm")
+			tooltip:AddLine("|cFFff4040Left Click|r toggle window visibility\n|cFFff4040Right Click|r open config menu", 0.2, 1, 0.2)
+		end,
+	}) , config.minimapIcon)
+	-- timer
+	timer:SetScript("OnLoop", RefreshText)
+	-- events
 	addon:SetScript('OnEvent', function(self,event,...)	self[event](self,event,...) end)
 	addon:RegisterEvent("CHAT_MSG_SYSTEM")
-	addon:RegisterEvent("CHAT_MSG_LOOT")
-	addon:RegisterEvent("CHAT_MSG_MONEY")
 	addon:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 	addon:RegisterEvent("PLAYER_LOGOUT")
-	timer:SetScript("OnLoop", RefreshText)
+	-- init
 	LayoutFrame()
-	RefreshText()
+	if config.sessionStart then
+		SessionStart(true)
+	else
+		RefreshText()
+	end
 	addon:ZONE_CHANGED_NEW_AREA()
 end
 
@@ -337,16 +358,13 @@ addon:SetScript("OnEvent", function(frame, event, name)
 end)
 
 -- config cmdline
-SLASH_KIWIFARM1 = "/kfarm"
+SLASH_KIWIFARM1,SLASH_KIWIFARM2 = "/kfarm", "/kiwifarm"
 SlashCmdList.KIWIFARM = function(args)
 	local arg1,arg2,arg3 = strsplit(" ",args,3)
 	arg1, arg2 = strlower(arg1 or ''), strlower(arg2 or '')
 	if arg1 == 'show' then
-		config.disabled = nil
 		addon:Show()
-		addon:ZONE_CHANGED_NEW_AREA()
 	elseif arg1 == 'hide' then
-		config.disabled = true
 		addon:Hide()
 	elseif arg1 == 'font' then
 		if tonumber(arg2) then
@@ -368,6 +386,13 @@ SlashCmdList.KIWIFARM = function(args)
 			config.zones[zone] = true
 		end
 		addon:ZONE_CHANGED_NEW_AREA()
+	elseif arg1 == 'minimap' then
+		config.minimapIcon.hide = not config.minimapIcon.hide
+		if config.minimapIcon.hide then
+			LibStub("LibDBIcon-1.0"):Hide(addonName)
+		else
+			LibStub("LibDBIcon-1.0"):Show(addonName)
+		end
 	else
 		print("KiwiFarm Classic:")
 		print("  Last Reset: time elapsed from last instance reset.")
@@ -381,7 +406,7 @@ SlashCmdList.KIWIFARM = function(args)
 		print("  /kfarm zone clear||add  -- clear all zones or add the current zone")
 		print("  /kfarm reset  -- reset instances")
 		print("  /kfarm clear  -- remove all saved resets")
-
+		print("  /kfarm minimap -- toggle minimap icon visibility")
 	end
 	RefreshText()
 	print("KiwiFarm setup:")
@@ -456,7 +481,7 @@ do
 		  opacityFunc= function() config.backColor[4] = 1 - OpacitySliderFrame:GetValue(); SetBackground(); end,
 		  cancelFunc = function(c) local cc=config.backColor; cc[1], cc[2], cc[3], cc[4] = c.r, c.g, c.b, 1-c.opacity; SetBackground(); end,
 		},
-		{ text = 'Hide Addon',   notCheckable = true, func = function() config.disabled=true; addon:Hide() end },
+		{ text = 'Hide Window',   notCheckable = true, func = function() addon:Hide() end },
 	}
 	function addon:ShowMenu()
 		-- refresh daily money
