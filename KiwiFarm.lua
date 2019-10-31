@@ -55,6 +55,28 @@ local function RegMoney(money)
 	config.daily[key] = (config.daily[key] or 0) + money
 end
 
+local function GetItemValue(itemLink)
+	local itemID = strmatch(itemLink, "item:(%d+):") or itemLink
+	local name, link, rarity, level, minLevel, typ, subTyp, stackCount, equipLoc, icon, vendorPrice, class = GetItemInfo(itemLink)
+	local source = config.priceByRarity[rarity or 0]
+	local price
+	if source then
+		if source == 'Atr:DBMarket' and Atr_GetAuctionBuyout then -- Auctionator: market
+			price = Atr_GetAuctionBuyout(name)
+		elseif source == 'Atr:Destroy' and Atr_GetDisenchantValue then -- Auctionator: disenchant
+			price = Atr_CalcDisenchantPrice(class,rarity,level) -- Atr_GetDisenchantValue() is bugged cannot be used
+		elseif source == 'Atr:MaxPrice'  and Atr_GetDisenchantValue then
+			price = math.max( Atr_GetAuctionBuyout(name) or 0, config.pricesMaxDisenchant and Atr_CalcDisenchantPrice(class,rarity,level) or 0, vendorPrice )
+		elseif source == 'TSM:MaxPrice' then
+			local f, i = TSMAPI_FOUR.CustomPrice.GetValue, "i:"..itemID
+			price = math.max( f("DBMarket",i) or 0, f("DBMinBuyout",i) or 0, config.pricesMaxDisenchant and f("Destroy",i) or 0, vendorPrice)
+		else -- TSM4 sources
+			price = TSMAPI_FOUR.CustomPrice.GetValue(source, "i:"..itemID)
+		end
+	end
+	return price or vendorPrice, rarity
+end
+
 -- update text
 local function RefreshText()
 	local curtime = time()
@@ -186,12 +208,12 @@ function addon:CHAT_MSG_LOOT(event,msg)
 			itemLink = strmatch(msg, PATTERN_LOOTS)
 		end
 		if itemLink then
-			local name, link, rarity, level, minLevel, typ, subTyp, stackCount, equipLoc, icon, price = GetItemInfo(itemLink)
-			local money = (price or 0)*quantity
+			local price, rarity = GetItemValue(itemLink)
+			local money = price*quantity
 			config.moneyItems = config.moneyItems + money
 			RegMoney(money)
 			if rarity>=2 then -- display only green or superior
-				print("KiwiFarm looted: ", FmtMoney(money), itemLink )
+				print( string.format("|cFF7FFF72KiwiFarm:|r looted: %sx%d %s", itemLink, quantity, FmtMoney(money) ) )
 			end
 		end
 	end
@@ -228,7 +250,7 @@ function addon:ZONE_CHANGED_NEW_AREA()
 			self:Hide()
 		end
 	end
-	if config.sessionStart and not config.lockspent then
+	if config.sessionStart and not config.lockspent then -- to track when the instance save becomes dirty (mob killeds)
 		if not ins then
 			self:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
 		elseif typ=='party' then
@@ -245,7 +267,7 @@ do
 	hooksecurefunc("CancelLogout", function() isLogout=nil end)
 	function addon:PLAYER_LOGOUT()
 		if isLogout then
-			if config.lockspent then
+			if config.lockspent and not IsInInstance() then
 				AddReset()
 			end
 			SessionStop()
@@ -305,6 +327,7 @@ local function Initialize()
 		config = { resets = {} }; root[serverKey] = config
 	end
 	config.backColor = config.backColor or { 0,0,0,.4 }
+	config.priceByRarity = config.priceByRarity or {}
 	config.daily = config.daily or {}
 	config.moneyCash  = config.moneyCash or 0
 	config.moneyItems = config.moneyItems  or 0
@@ -455,19 +478,67 @@ do
 		if not next(config.zones) then config.zones = nil end
 		addon:ZONE_CHANGED_NEW_AREA()
 	end
-	local menuFonts = {}
-	local menuZones = {}
-	local menuDaily = {}
+	local function SetItemPrice(info)
+		local source, rarity = strsplit(';',info.value)
+		config.priceByRarity[tonumber(rarity)] = source~='Vendor' and source or nil
+	end
+	local function PriceChecked(info)
+		local source, rarity = strsplit(';',info.value)
+		return (config.priceByRarity[tonumber(rarity)] or "Vendor") == source
+	end
+	local function CreatePricesMenu(menu)
+		local function CreateItem(class, rarity)
+			local t = {}
+			t[#t+1] = { text = 'Vendor Price', value = 'Vendor;'..rarity, checked = PriceChecked, func = SetItemPrice }
+			if Atr_GetAuctionBuyout then
+				t[#t+1] = { text = 'Auctionator: Max Price',    value = 'Atr:MaxPrice;'..rarity, checked = PriceChecked, func = SetItemPrice }
+				t[#t+1] = { text = 'Auctionator: Market Value', value = 'Atr:DBMarket;'..rarity, checked = PriceChecked, func = SetItemPrice }
+				if rarity>1 then
+					t[#t+1] = { text = 'Auctionator: Disenchant',   value = 'Atr:Destroy;'..rarity,  checked = PriceChecked, func = SetItemPrice }
+				end
+			end
+			if TSMAPI_FOUR then
+				t[#t+1] = { text = 'TSM4: Max Price',    value = 'TSM:MaxPrice;'..rarity, checked = PriceChecked, func = SetItemPrice }
+				t[#t+1] = { text = 'TSM4: Market Value', value = 'DBMarket;'..rarity,     checked = PriceChecked, func = SetItemPrice }
+				t[#t+1] = { text = 'TSM4: Min Buyout',   value = 'DBMinBuyout;'..rarity,  checked = PriceChecked, func = SetItemPrice }
+				if rarity>1 then
+					t[#t+1] = { text = 'TSM4: Disenchant',   value = 'Destroy;'..rarity, checked = PriceChecked, func = SetItemPrice }
+				end
+			end
+			local _,_,_,color = GetItemQualityColor(rarity)
+			return { text = string.format("|c%s%s|r",color,class), notCheckable= true, hasArrow = true, menuList = t }
+		end
+		local items = {}
+		items[#items+1] = { text = 'Prices by Quality', notCheckable = true, isTitle = true }
+		items[#items+1] = CreateItem( 'Common', 1)
+		items[#items+1] = CreateItem( 'Uncommon', 2)
+		items[#items+1] = CreateItem( 'Rare', 3)
+		items[#items+1] = CreateItem( 'Epic', 4)
+		items[#items+1] = CreateItem( 'Legendary', 5)
+		items[#items+1] = { text = 'Other settings',  notCheckable= true, hasArrow = true, menuList = {
+			{ text = 'Include disenchant value in Max Prices', checked = function() return config.pricesMaxDisenchant end, func = function() config.pricesMaxDisenchant = not config.pricesMaxDisenchant end }
+		} }
+		menu.text = 'Price Sources'
+		menu.notCheckable= true
+		menu.hasArrow = true
+		menu.menuList = items
+	end
+	local menuFonts  = {}
+	local menuZones  = {}
+	local menuDaily  = {}
+	local menuPrices = {}
 	local menuTable = {
 		{ text = 'Kiwi Farm [/kfarm]', notCheckable= true, isTitle = true },
 		{ text = 'Session',     notCheckable= true, hasArrow = true, menuList = {
 			{ text = 'Start Session',   notCheckable = true, func = SessionStart },
 			{ text = 'Stop Session',    notCheckable = true, func = SessionStop  },
-			{ text = 'Reset Session',   notCheckable = true, func = SessionReset },
+			{ text = 'Clear Session',   notCheckable = true, func = SessionReset },
 		} },
 		{ text = 'Gold per day', notCheckable= true, hasArrow = true, menuList = menuDaily },
-		{ text = 'Farming Zones',   notCheckable= true, hasArrow = true, menuList = menuZones },
 		{ text = 'Reset Instances', notCheckable = true, func = ResetInstances },
+		{ text = 'Settings',        notCheckable = true, isTitle = true },
+		{ text = 'Farming Zones',   notCheckable= true, hasArrow = true, menuList = menuZones },
+		menuPrices,
 		{ text = 'Appearance',      notCheckable = true, isTitle = true },
 		{ text = 'Font', notCheckable= true, hasArrow = true, menuList = menuFonts },
 		{ text = 'Font Size', notCheckable= true, hasArrow = true, menuList = {
@@ -495,6 +566,10 @@ do
 			menuDaily[i] = item
 			day = day - 1
 			header = date("%m/%d:",day*86400)
+		end
+		-- prices menu
+		if #menuPrices==0 then
+			CreatePricesMenu(menuPrices)
 		end
 		-- refresh zones
 		wipe(menuZones)
