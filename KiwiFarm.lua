@@ -117,8 +117,8 @@ local function RefreshText()
 	local mTotalHour = sSession>0 and floor(mTotal*3600/sSession) or 0
 	-- create display text
 	text:SetFormattedText(
-		"|cFF7FFF72%s|r\n%s%dm %ds|r\n%s%dm %ds|r\n%s%d|r\n%s%dm %ds|r\n%s\n%s\n%s\n%s",
-		GetZoneText(), sessionC,m0,s0, spentC,m1,s1, remainC,remain, lockedC,m2,s2, FmtMoney(config.moneyCash),FmtMoney(config.moneyItems),FmtMoney(mTotal), FmtMoney(mTotalHour)
+		"|cFF7FFF72%s|r\n%s%dm %ds|r\n%s%dm %ds|r\n%s%d|r\n%s%dm %ds|r\n%d\n%s\n%s\n%s\n%s",
+		GetZoneText(), sessionC,m0,s0, spentC,m1,s1, remainC,remain, lockedC,m2,s2, config.mobKills or 0, FmtMoney(config.moneyCash),FmtMoney(config.moneyItems),FmtMoney(mTotal), FmtMoney(mTotalHour)
 	)
 	-- update timer status
 	local stopped = #resets==0 and not config.lockspent and not config.sessionStart
@@ -147,13 +147,12 @@ end
 local function SessionStart(force)
 	if not config.sessionStart or force==true then
 		config.sessionStart = config.sessionStart or time()
-		config.moneyCash = config.moneyCash or 0
+		config.moneyCash  = config.moneyCash or 0
 		config.moneyItems = config.moneyItems or 0
+		config.mobKills  = config.mobKills or 0
 		addon:RegisterEvent("CHAT_MSG_LOOT")
 		addon:RegisterEvent("CHAT_MSG_MONEY")
-		if not config.lockspent and IsInInstance() then
-			addon:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
-		end
+		addon:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
 		RefreshText()
 	end
 end
@@ -166,9 +165,7 @@ local function SessionStop()
 		config.sessionStart = nil
 		addon:UnregisterEvent("CHAT_MSG_LOOT")
 		addon:UnregisterEvent("CHAT_MSG_MONEY")
-		if not config.lockspent and IsInInstance() then
-			addon:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
-		end
+		addon:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
 	end
 end
 
@@ -176,6 +173,7 @@ end
 local function SessionReset()
 	config.sessionStart = config.sessionStart and time() or nil
 	config.sessionDuration = nil
+	config.mobKills  = 0
 	config.moneyCash  = 0
 	config.moneyItems = 0
 	RefreshText()
@@ -258,15 +256,16 @@ function addon:ZONE_CHANGED_NEW_AREA()
 				RefreshText()
 			end
 			self:Show()
-		elseif addon:IsVisible() then
+		else
+			SessionStop()
 			self:Hide()
 		end
 	end
-	if config.sessionStart and not config.lockspent then -- to track when the instance save becomes dirty (mob killeds)
-		if not ins then
-			self:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
-		elseif typ=='party' then
+	if config.sessionStart then -- to track when the instance save becomes dirty (mob killeds)
+		if ins then
 			self:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+		else
+			self:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
 		end
 	end
 end
@@ -291,10 +290,12 @@ end
 -- and save this hidden reset, see addon:PLAYER_LOGOUT()
 function addon:COMBAT_LOG_EVENT_UNFILTERED()
 	local _, eventType,_,_,_,_,_,dstGUID,_,dstFlags = CombatLogGetCurrentEventInfo()
-	if eventType == 'UNIT_DIED' and band(dstFlags,COMBATLOG_OBJECT_CONTROL_NPC)~=0 and IsInInstance() then
-		config.lockspent = time()
-		addon:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
-		timer:Play()
+	if eventType == 'UNIT_DIED' and band(dstFlags,COMBATLOG_OBJECT_CONTROL_NPC)~=0 then
+		if not config.lockspent then
+			config.lockspent = time()
+			timer:Play()
+		end
+		config.mobKills = (config.mobKills or 0) + 1
 	end
 end
 
@@ -320,7 +321,7 @@ local function LayoutFrame()
 	text0:SetJustifyH('LEFT')
 	text0:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
 	text0:SetText(nil)
-	text0:SetText( "|cFF7FFF72Kiwi Farm:|r\nSession duration:\nLast reset:\nRemaining:\nLocked:\nCurrency:\nItems:\nTotal:\nTotal (per hour):" )
+	text0:SetText( "|cFF7FFF72Kiwi Farm:|r\nSession duration:\nLast reset:\nRemaining:\nLocked:\nMob Kills:\nCurrency:\nItems:\nTotal:\nTotal (per hour):" )
 	-- main frame size
 	addon:SetHeight( text0:GetHeight() + MARGIN*2 )
 	addon:SetWidth( text0:GetWidth() * 1.8 + MARGIN*2 )
