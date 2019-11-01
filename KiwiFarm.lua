@@ -7,6 +7,7 @@ local COLOR_TRANSPARENT = { 0,0,0,0 }
 local FONTS = { Arial = 'Fonts\\ARIALN.TTF', FrizQT = 'Fonts\\FRIZQT__.TTF', Morpheus = 'Fonts\\MORPHEUS.TTF', Skurri = 'Fonts\\SKURRI.TTF' }
 
 local time = time
+local date = date
 local strfind = strfind
 local floor = math.floor
 local band = bit.band
@@ -51,30 +52,39 @@ local function FmtMoney(money)
 end
 
 local function RegMoney(money)
-	local key = floor( time() / 86400 )
+	local key = date("%Y/%m/%d")
 	config.daily[key] = (config.daily[key] or 0) + money
 end
 
-local function GetItemValue(itemLink)
-	local itemID = strmatch(itemLink, "item:(%d+):") or itemLink
-	local name, link, rarity, level, minLevel, typ, subTyp, stackCount, equipLoc, icon, vendorPrice, class = GetItemInfo(itemLink)
-	local source = config.priceByRarity[rarity or 0]
-	local price
-	if source then
-		if source == 'Atr:DBMarket' and Atr_GetAuctionBuyout then -- Auctionator: market
-			price = Atr_GetAuctionBuyout(name)
-		elseif source == 'Atr:Destroy' and Atr_GetDisenchantValue then -- Auctionator: disenchant
-			price = Atr_CalcDisenchantPrice(class,rarity,level) -- Atr_GetDisenchantValue() is bugged cannot be used
-		elseif source == 'Atr:MaxPrice'  and Atr_GetDisenchantValue then
-			price = math.max( Atr_GetAuctionBuyout(name) or 0, config.pricesMaxDisenchant and Atr_CalcDisenchantPrice(class,rarity,level) or 0, vendorPrice )
-		elseif source == 'TSM:MaxPrice' then
-			local f, i = TSMAPI_FOUR.CustomPrice.GetValue, "i:"..itemID
-			price = math.max( f("DBMarket",i) or 0, f("DBMinBuyout",i) or 0, config.pricesMaxDisenchant and f("Destroy",i) or 0, vendorPrice)
-		else -- TSM4 sources
+local GetItemValue
+do
+	local function GetValue(source, itemID, name, class, rarity, level, vendorPrice)
+		local price
+		if source == 'Atr:DBMarket' then -- Auctionator: market
+			price = Atr_GetAuctionBuyout and Atr_GetAuctionBuyout(name)
+		elseif source == 'Atr:Destroy' then -- Auctionator: disenchant
+			price = Atr_CalcDisenchantPrice and Atr_CalcDisenchantPrice(class,rarity,level) -- Atr_GetDisenchantValue() is bugged cannot be used
+		elseif source ~= 'Vendor' then -- TSM4 sources
 			price = TSMAPI_FOUR.CustomPrice.GetValue(source, "i:"..itemID)
 		end
+		return price or vendorPrice
 	end
-	return price or vendorPrice, rarity
+	function GetItemValue(itemLink)
+		local itemID = strmatch(itemLink, "item:(%d+):") or itemLink
+		local name, link, rarity, level, minLevel, typ, subTyp, stackCount, equipLoc, icon, vendorPrice, class = GetItemInfo(itemLink)
+		local source = config.priceByRarity[rarity or 0]
+		if source == 'MaxPrice' then
+			local price = vendorPrice
+			for src in pairs(config.priceMaxSource) do
+				price = math.max( price, GetValue(src, itemID, name, class, rarity, level, vendorPrice) )
+			end
+			return price, rarity
+		elseif source then
+			return GetValue(source, itemID, name, class, rarity, level, vendorPrice), rarity
+		else
+			return vendorPrice, rarity
+		end
+	end
 end
 
 -- update text
@@ -244,6 +254,8 @@ function addon:ZONE_CHANGED_NEW_AREA()
 		if config.zones[GetZoneText()] then
 			if ins then
 				SessionStart()
+			else
+				RefreshText()
 			end
 			self:Show()
 		elseif addon:IsVisible() then
@@ -328,6 +340,7 @@ local function Initialize()
 	end
 	config.backColor = config.backColor or { 0,0,0,.4 }
 	config.priceByRarity = config.priceByRarity or {}
+	config.priceMaxSource = config.priceMaxSource or {}
 	config.daily = config.daily or {}
 	config.moneyCash  = config.moneyCash or 0
 	config.moneyItems = config.moneyItems  or 0
@@ -486,38 +499,52 @@ do
 		local source, rarity = strsplit(';',info.value)
 		return (config.priceByRarity[tonumber(rarity)] or "Vendor") == source
 	end
+	local function SetMaxPriceSource(info)
+		config.priceMaxSource[info.value] = (not config.priceMaxSource[info.value]) or nil
+	end
+	local function MaxPriceSourceChecked(info)
+		return config.priceMaxSource[info.value]
+	end
+
 	local function CreatePricesMenu(menu)
 		local function CreateItem(class, rarity)
 			local t = {}
 			t[#t+1] = { text = 'Vendor Price', value = 'Vendor;'..rarity, checked = PriceChecked, func = SetItemPrice }
 			if Atr_GetAuctionBuyout then
-				t[#t+1] = { text = 'Auctionator: Max Price',    value = 'Atr:MaxPrice;'..rarity, checked = PriceChecked, func = SetItemPrice }
 				t[#t+1] = { text = 'Auctionator: Market Value', value = 'Atr:DBMarket;'..rarity, checked = PriceChecked, func = SetItemPrice }
 				if rarity>1 then
-					t[#t+1] = { text = 'Auctionator: Disenchant',   value = 'Atr:Destroy;'..rarity,  checked = PriceChecked, func = SetItemPrice }
+					t[#t+1] = { text = 'Auctionator: Disenchant', value = 'Atr:Destroy;'..rarity,  checked = PriceChecked, func = SetItemPrice }
 				end
 			end
 			if TSMAPI_FOUR then
-				t[#t+1] = { text = 'TSM4: Max Price',    value = 'TSM:MaxPrice;'..rarity, checked = PriceChecked, func = SetItemPrice }
 				t[#t+1] = { text = 'TSM4: Market Value', value = 'DBMarket;'..rarity,     checked = PriceChecked, func = SetItemPrice }
 				t[#t+1] = { text = 'TSM4: Min Buyout',   value = 'DBMinBuyout;'..rarity,  checked = PriceChecked, func = SetItemPrice }
 				if rarity>1 then
-					t[#t+1] = { text = 'TSM4: Disenchant',   value = 'Destroy;'..rarity, checked = PriceChecked, func = SetItemPrice }
+					t[#t+1] = { text = 'TSM4: Disenchant', value = 'Destroy;'..rarity, checked = PriceChecked, func = SetItemPrice }
 				end
 			end
+			t[#t+1] = { text = 'Max Price', value = 'MaxPrice;'..rarity, checked = PriceChecked, func = SetItemPrice }
 			local _,_,_,color = GetItemQualityColor(rarity)
 			return { text = string.format("|c%s%s|r",color,class), notCheckable= true, hasArrow = true, menuList = t }
 		end
-		local items = {}
+		local items, smax = {}, {}
 		items[#items+1] = { text = 'Prices by Quality', notCheckable = true, isTitle = true }
 		items[#items+1] = CreateItem( 'Common', 1)
 		items[#items+1] = CreateItem( 'Uncommon', 2)
 		items[#items+1] = CreateItem( 'Rare', 3)
 		items[#items+1] = CreateItem( 'Epic', 4)
 		items[#items+1] = CreateItem( 'Legendary', 5)
-		items[#items+1] = { text = 'Other settings',  notCheckable= true, hasArrow = true, menuList = {
-			{ text = 'Include disenchant value in Max Prices', checked = function() return config.pricesMaxDisenchant end, func = function() config.pricesMaxDisenchant = not config.pricesMaxDisenchant end }
-		} }
+		items[#items+1] = { text = '|cFFc0c000Max Price Sources:|r', notCheckable= true, hasArrow = true, menuList = smax }
+		smax[#smax+1] = { text = 'Vendor Price (Always active)', checked = true }
+		if Atr_GetAuctionBuyout then
+			smax[#smax+1] = { text = 'Auctionator: Market Value', value = 'Atr:DBMarket', keepShownOnClick=1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource }
+			smax[#smax+1] = { text = 'Auctionator: Disenchant',   value = 'Atr:Destroy',  keepShownOnClick=1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource }
+		end
+		if TSMAPI_FOUR then
+			smax[#smax+1] = { text = 'TSM4: Market Value',        value = 'DBMarket',     keepShownOnClick=1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource }
+			smax[#smax+1] = { text = 'TSM4: Min Buyout',          value = 'DBMinBuyout',  keepShownOnClick=1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource }
+			smax[#smax+1] = { text = 'TSM4: Disenchant',          value = 'Destroy',      keepShownOnClick=1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource }
+		end
 		menu.text = 'Price Sources'
 		menu.notCheckable= true
 		menu.hasArrow = true
@@ -556,16 +583,16 @@ do
 	}
 	function addon:ShowMenu()
 		-- refresh daily money
-		local day, header = floor(time()/86400), 'Today:'
+		local pre = 'Today'
+		local tim = time()
+		local key = date("%Y/%m/%d",tim)
 		for i=1,7 do
-			local money, item = config.daily[day]
-			if money then
-				item = menuDaily[i] or { notCheckable= true }
-				item.text = string.format('%s %s', header, FmtMoney(money) )
-			end
+			local money = config.daily[key] or 0
+			local item  = menuDaily[i] or { notCheckable= true }
+			item.text = string.format('%s: %s', pre, money>0 and FmtMoney(money) or '-' )
 			menuDaily[i] = item
-			day = day - 1
-			header = date("%m/%d:",day*86400)
+			tim = tim - 86400
+			key, pre = date("%Y/%m/%d", tim), date("%m/%d", tim)
 		end
 		-- prices menu
 		if #menuPrices==0 then
