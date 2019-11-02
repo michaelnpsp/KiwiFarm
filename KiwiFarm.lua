@@ -382,7 +382,7 @@ local function Initialize()
 			end
 		end,
 		OnTooltipShow = function(tooltip)
-			tooltip:AddLine("Kiwi Farm")
+			tooltip:AddDoubleLine("Kiwi Farm", GetAddOnMetadata(addonName, "Version") )
 			tooltip:AddLine("|cFFff4040Left Click|r toggle window visibility\n|cFFff4040Right Click|r open config menu", 0.2, 1, 0.2)
 		end,
 	}) , config.minimapIcon)
