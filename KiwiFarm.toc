@@ -4,7 +4,6 @@
 #@non-retail@
 # ## Interface: 11302
 #@end-non-retail@
-## Interface: 11302
 ## Title: |cFF7FFF72Kiwi|r Farm
 ## Notes: Instances Reset & Gold Tracker
 ## Author: MiChaeL
