@@ -490,7 +490,7 @@ do
 	local function SortMenu(menu)
 		table.sort(menu, function(a,b) return a.text<b.text end)
 	end
-	local function FixItemsMenu(menu)
+	local function MenuSplit(menu)
 		SortMenu(menu)
 		local count, items, first, last = #menu
 		if count>28 then
@@ -638,7 +638,7 @@ do
 		for name, key in pairs(media and media:HashTable('font') or FONTS) do
 			table.insert( menuFonts, { text = name, value = key, func = SetFont, checked = FontChecked } )
 		end
-		FixItemsMenu(menuFonts)
+		MenuSplit(menuFonts)
 		-- remove non existant sources
 		for _,menu in ipairs( { menuSources, menuMaxSources } ) do
 			for i=#menu,1,-1 do
