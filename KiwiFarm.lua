@@ -1,8 +1,8 @@
--- KiwiFarm Classic (C) 2019 MiCHaEL
+-- KiwiFarm (C) 2019 MiCHaEL
 local addonName = ...
 
+local RESET_MAX = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC) and 5 or 10
 local MARGIN = 4
-local RESET_MAX = 5
 local COLOR_TRANSPARENT = { 0,0,0,0 }
 local FONTS = {
 	Arial = 'Fonts\\ARIALN.TTF',
