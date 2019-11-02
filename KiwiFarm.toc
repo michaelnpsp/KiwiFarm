@@ -1,6 +1,6 @@
 ## Interface: 11302
-## Title: |cFF7FFF72Kiwi|r Farm
-## Notes: Instances Reset & Gold Tracker Classic
+## Title: |cFF7FFF72Kiwi|r Farm Classic
+## Notes: Instances Reset & Gold Tracker
 ## Author: Michael
 ## SavedVariables: KiwiFarmDB
 

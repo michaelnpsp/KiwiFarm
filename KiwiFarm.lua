@@ -4,8 +4,25 @@ local addonName = ...
 local MARGIN = 4
 local RESET_MAX = 5
 local COLOR_TRANSPARENT = { 0,0,0,0 }
-local FONTS = { Arial = 'Fonts\\ARIALN.TTF', FrizQT = 'Fonts\\FRIZQT__.TTF', Morpheus = 'Fonts\\MORPHEUS.TTF', Skurri = 'Fonts\\SKURRI.TTF' }
+local FONTS = {
+	Arial = 'Fonts\\ARIALN.TTF',
+	FrizQT = 'Fonts\\FRIZQT__.TTF',
+	Morpheus = 'Fonts\\MORPHEUS.TTF',
+	Skurri = 'Fonts\\SKURRI.TTF'
+}
+local SOUNDS = {
+	["Auction Window Open"] = "Sound/Interface/AuctionWindowOpen.ogg",
+	["Auction Window Close"] = "Sound/Interface/AuctionWindowClose.ogg",
+	["Coin" ] =  "Sound/interface/lootcoinlarge.ogg",
+	["Money"] =  "sound/interface/imoneydialogopen.ogg",
+	["Level Up"] = "Sound/Interface/LevelUp.ogg",
+	["Gun Fire"] = "sound/item/weapons/gunfire01.ogg",
+	["Player Invite"] = "Sound/Interface/iPlayerInviteA.ogg",
+	["Raid Warning"] = "Sound/Interface/RaidWarning.ogg",
+	["Ready Check"] = "Sound/Interface/ReadyCheck.ogg",
+}
 
+--
 local time = time
 local date = date
 local strfind = strfind
@@ -118,7 +135,7 @@ local function RefreshText()
 	-- create display text
 	text:SetFormattedText(
 		"|cFF7FFF72%s|r\n%s%dm %ds|r\n%s%dm %ds|r\n%s%d|r\n%s%dm %ds|r\n%d\n%s\n%s\n%s\n%s",
-		GetZoneText(), sessionC,m0,s0, spentC,m1,s1, remainC,remain, lockedC,m2,s2, config.mobKills or 0, FmtMoney(config.moneyCash),FmtMoney(config.moneyItems),FmtMoney(mTotal), FmtMoney(mTotalHour)
+		GetZoneText(), sessionC,m0,s0, spentC,m1,s1, remainC,remain, lockedC,m2,s2, config.mobKills or 0, FmtMoney(config.moneyCash),FmtMoney(config.moneyItems),FmtMoney(mTotalHour),FmtMoney(mTotal)
 	)
 	-- update timer status
 	local stopped = #resets==0 and not config.lockspent and not config.sessionStart
@@ -223,6 +240,10 @@ function addon:CHAT_MSG_LOOT(event,msg)
 			if rarity>=2 then -- display only green or superior
 				print( string.format("|cFF7FFF72KiwiFarm:|r looted: %sx%d %s", itemLink, quantity, FmtMoney(money) ) )
 			end
+			local soundID = config.soundByRarity[rarity]
+			if soundID then
+				PlaySoundFile(soundID, "master")
+			end
 		end
 	end
 end
@@ -321,7 +342,7 @@ local function LayoutFrame()
 	text0:SetJustifyH('LEFT')
 	text0:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
 	text0:SetText(nil)
-	text0:SetText( "|cFF7FFF72Kiwi Farm:|r\nSession duration:\nLast reset:\nRemaining:\nLocked:\nMob Kills:\nCurrency:\nItems:\nTotal:\nTotal (per hour):" )
+	text0:SetText( "|cFF7FFF72Kiwi Farm:|r\nSession duration:\nLast reset:\nRemaining:\nLocked:\nMobs killed:\nGold cash:\nGold items:\nGold/hour:\nGold total:" )
 	-- main frame size
 	addon:SetHeight( text0:GetHeight() + MARGIN*2 )
 	addon:SetWidth( text0:GetWidth() * 1.8 + MARGIN*2 )
@@ -341,6 +362,7 @@ local function Initialize()
 	end
 	config.backColor = config.backColor or { 0,0,0,.4 }
 	config.priceByRarity = config.priceByRarity or {}
+	config.soundByRarity = config.soundByRarity or {}
 	config.priceMaxSource = config.priceMaxSource or {}
 	config.daily = config.daily or {}
 	config.moneyCash  = config.moneyCash or 0
@@ -462,6 +484,31 @@ end
 -- config popup menu
 do
 	local menuFrame = CreateFrame("Frame", "KiwiFarmPopupMenu", UIParent, "UIDropDownMenuTemplate")
+	local function FmtQuality(i)
+		return string.format( "|c%s%s|r", select(4,GetItemQualityColor(i)), _G[ 'ITEM_QUALITY'..i..'_DESC'] )
+	end
+	local function SortMenu(menu)
+		table.sort(menu, function(a,b) return a.text<b.text end)
+	end
+	local function FixItemsMenu(menu)
+		SortMenu(menu)
+		local count, items, first, last = #menu
+		if count>28 then
+			for i=1,count do
+				if not items or #items>=28 then
+					if items then
+						menu[#menu].text = strsub(first.text,1,1) .. '-' .. strsub(last.text,1,1)
+					end
+					items = {}
+					table.insert(menu, { notCheckable= true, hasArrow = true, menuList = items } )
+					first = menu[1]
+				end
+				last = table.remove(menu,1)
+				table.insert(items, last)
+			end
+			menu[#menu].text = strsub(first.text,1,1) .. '-' .. strsub(last.text,1,1)
+		end
+	end
 	local function SetBackground()
 		backTexture:SetColorTexture( unpack(config.backColor or COLOR_TRANSPARENT) )
 	end
@@ -481,6 +528,15 @@ do
 	local function FontChecked(info)
 		return info.value == (config.fontname or FONTS.Arial)
 	end
+	local function SetSound(info)
+		local sound, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
+		config.soundByRarity[rarity] = sound~=0 and sound or nil
+		if sound~=0 then PlaySoundFile(sound, "master") end
+	end
+	local function SoundChecked(info)
+		local sound, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
+		return (config.soundByRarity[rarity] or 0) == sound
+	end
 	local function ZoneAdd()
 		local zone = GetZoneText()
 		config.zones = config.zones or {}
@@ -493,12 +549,12 @@ do
 		addon:ZONE_CHANGED_NEW_AREA()
 	end
 	local function SetItemPrice(info)
-		local source, rarity = strsplit(';',info.value)
-		config.priceByRarity[tonumber(rarity)] = source~='Vendor' and source or nil
-	end
+		local source, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
+		config.priceByRarity[rarity] = source~='Vendor' and source or nil
+ 	end
 	local function PriceChecked(info)
-		local source, rarity = strsplit(';',info.value)
-		return (config.priceByRarity[tonumber(rarity)] or "Vendor") == source
+		local source, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
+		return (config.priceByRarity[rarity] or "Vendor") == source
 	end
 	local function SetMaxPriceSource(info)
 		config.priceMaxSource[info.value] = (not config.priceMaxSource[info.value]) or nil
@@ -506,68 +562,56 @@ do
 	local function MaxPriceSourceChecked(info)
 		return config.priceMaxSource[info.value]
 	end
-
-	local function CreatePricesMenu(menu)
-		local function CreateItem(class, rarity)
-			local t = {}
-			t[#t+1] = { text = 'Vendor Price', value = 'Vendor;'..rarity, checked = PriceChecked, func = SetItemPrice }
-			if Atr_GetAuctionBuyout then
-				t[#t+1] = { text = 'Auctionator: Market Value', value = 'Atr:DBMarket;'..rarity, checked = PriceChecked, func = SetItemPrice }
-				if rarity>1 then
-					t[#t+1] = { text = 'Auctionator: Disenchant', value = 'Atr:Destroy;'..rarity,  checked = PriceChecked, func = SetItemPrice }
-				end
-			end
-			if TSMAPI_FOUR then
-				t[#t+1] = { text = 'TSM4: Market Value', value = 'DBMarket;'..rarity,     checked = PriceChecked, func = SetItemPrice }
-				t[#t+1] = { text = 'TSM4: Min Buyout',   value = 'DBMinBuyout;'..rarity,  checked = PriceChecked, func = SetItemPrice }
-				if rarity>1 then
-					t[#t+1] = { text = 'TSM4: Disenchant', value = 'Destroy;'..rarity, checked = PriceChecked, func = SetItemPrice }
-				end
-			end
-			t[#t+1] = { text = 'Max Price', value = 'MaxPrice;'..rarity, checked = PriceChecked, func = SetItemPrice }
-			local _,_,_,color = GetItemQualityColor(rarity)
-			return { text = string.format("|c%s%s|r",color,class), notCheckable= true, hasArrow = true, menuList = t }
-		end
-		local items, smax = {}, {}
-		items[#items+1] = { text = 'Prices by Quality', notCheckable = true, isTitle = true }
-		items[#items+1] = CreateItem( 'Common', 1)
-		items[#items+1] = CreateItem( 'Uncommon', 2)
-		items[#items+1] = CreateItem( 'Rare', 3)
-		items[#items+1] = CreateItem( 'Epic', 4)
-		items[#items+1] = CreateItem( 'Legendary', 5)
-		items[#items+1] = { text = '|cFFc0c000Max Price Sources:|r', notCheckable= true, hasArrow = true, menuList = smax }
-		smax[#smax+1] = { text = 'Vendor Price (Always active)', checked = true }
-		if Atr_GetAuctionBuyout then
-			smax[#smax+1] = { text = 'Auctionator: Market Value', value = 'Atr:DBMarket', keepShownOnClick=1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource }
-			smax[#smax+1] = { text = 'Auctionator: Disenchant',   value = 'Atr:Destroy',  keepShownOnClick=1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource }
-		end
-		if TSMAPI_FOUR then
-			smax[#smax+1] = { text = 'TSM4: Market Value',        value = 'DBMarket',     keepShownOnClick=1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource }
-			smax[#smax+1] = { text = 'TSM4: Min Buyout',          value = 'DBMinBuyout',  keepShownOnClick=1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource }
-			smax[#smax+1] = { text = 'TSM4: Disenchant',          value = 'Destroy',      keepShownOnClick=1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource }
-		end
-		menu.text = 'Price Sources'
-		menu.notCheckable= true
-		menu.hasArrow = true
-		menu.menuList = items
-	end
-	local menuFonts  = {}
-	local menuZones  = {}
-	local menuDaily  = {}
-	local menuPrices = {}
+	local menuSounds  = {}
+	local menuFonts   = {}
+	local menuZones   = {}
+	local menuDaily   = { { text = 'Daily Gold Earned', notCheckable= true, isTitle = true } }
+	local menuSources = {
+		{ text = 'Vendor Price',              value = 'Vendor',                     checked = PriceChecked, func = SetItemPrice },
+		{ text = 'Auctionator: Market Value', value = 'Atr:DBMarket', arg1 = 'Atr', checked = PriceChecked, func = SetItemPrice },
+		{ text = 'Auctionator: Disenchant',   value = 'Atr:Destroy' , arg1 = 'Atr', checked = PriceChecked, func = SetItemPrice },
+		{ text = 'TSM4: Market Value',        value = 'DBMarket',     arg1 = 'TSM', checked = PriceChecked, func = SetItemPrice },
+		{ text = 'TSM4: Min Buyout',          value = 'DBMinBuyout',  arg1 = 'TSM', checked = PriceChecked, func = SetItemPrice },
+		{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', checked = PriceChecked, func = SetItemPrice },
+		{ text = 'Max Price',                 value = 'MaxPrice',                   checked = PriceChecked, func = SetItemPrice },
+	}
+	local menuMaxSources = {
+		{ text = 'Vendor Price (Always active)', isNotRadio = true, checked = true },
+		{ text = 'Auctionator: Market Value', value = 'Atr:DBMarket', arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource },
+		{ text = 'Auctionator: Disenchant',   value = 'Atr:Destroy',  arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource },
+		{ text = 'TSM4: Market Value',        value = 'DBMarket',     arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource },
+		{ text = 'TSM4: Min Buyout',          value = 'DBMinBuyout',  arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource },
+		{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource },
+	}
 	local menuTable = {
 		{ text = 'Kiwi Farm [/kfarm]', notCheckable= true, isTitle = true },
-		{ text = 'Session',     notCheckable= true, hasArrow = true, menuList = {
+		{ text = 'Session', notCheckable= true, hasArrow = true, menuList = {
 			{ text = 'Start Session',   notCheckable = true, func = SessionStart },
 			{ text = 'Stop Session',    notCheckable = true, func = SessionStop  },
 			{ text = 'Clear Session',   notCheckable = true, func = SessionReset },
 		} },
-		{ text = 'Gold per day', notCheckable= true, hasArrow = true, menuList = menuDaily },
+		{ text = 'Gold', notCheckable= true, hasArrow = true, menuList = menuDaily },
 		{ text = 'Reset Instances', notCheckable = true, func = ResetInstances },
 		{ text = 'Settings',        notCheckable = true, isTitle = true },
-		{ text = 'Farming Zones',   notCheckable= true, hasArrow = true, menuList = menuZones },
-		menuPrices,
-		{ text = 'Appearance',      notCheckable = true, isTitle = true },
+		{ text = 'Zones',   notCheckable= true, hasArrow = true, menuList = menuZones },
+		{ text = 'Prices', notCheckable = true, hasArrow = true, menuList = {
+			{ text = 'Prices by Quality', notCheckable = true, isTitle = true },
+			{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuSources },
+			{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuSources },
+			{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuSources },
+			{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuSources },
+			{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuSources },
+			{ text = '|cFFc0c000Max Price Sources:|r', notCheckable= true, hasArrow = true, menuList = menuMaxSources }
+		} },
+		{ text = 'Sounds', notCheckable = true, hasArrow = true, menuList = {
+			{ text = 'Looted items Sound', notCheckable = true, isTitle = true },
+			{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuSounds },
+			{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuSounds },
+			{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuSounds },
+			{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuSounds },
+			{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuSounds },
+		} },
+		{ text = 'Appearance', notCheckable = true, isTitle = true },
 		{ text = 'Font', notCheckable= true, hasArrow = true, menuList = menuFonts },
 		{ text = 'Font Size', notCheckable= true, hasArrow = true, menuList = {
 			{ text = 'Increase++',   value =  1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
@@ -580,46 +624,61 @@ do
 		  opacityFunc= function() config.backColor[4] = 1 - OpacitySliderFrame:GetValue(); SetBackground(); end,
 		  cancelFunc = function(c) local cc=config.backColor; cc[1], cc[2], cc[3], cc[4] = c.r, c.g, c.b, 1-c.opacity; SetBackground(); end,
 		},
-		{ text = 'Hide Window',   notCheckable = true, func = function() addon:Hide() end },
+		{ text = 'Hide Window', notCheckable = true, func = function() addon:Hide() end },
 	}
 	function addon:ShowMenu()
-		-- refresh daily money
-		local pre = 'Today'
-		local tim = time()
-		local key = date("%Y/%m/%d",tim)
-		for i=1,7 do
-			local money = config.daily[key] or 0
-			local item  = menuDaily[i] or { notCheckable= true }
-			item.text = string.format('%s: %s', pre, money>0 and FmtMoney(money) or '-' )
-			menuDaily[i] = item
-			tim = tim - 86400
-			key, pre = date("%Y/%m/%d", tim), date("%m/%d", tim)
+		local media = LibStub("LibSharedMedia-3.0", true)
+		-- fill sounds
+		table.insert( menuSounds, { text = '[None]', value = 0, func = SetSound, checked = SoundChecked } )
+		for name, key in pairs(SOUNDS) do
+			table.insert( menuSounds, { text = name, value = key, func = SetSound, checked = SoundChecked } )
 		end
-		-- prices menu
-		if #menuPrices==0 then
-			CreatePricesMenu(menuPrices)
+		SortMenu(menuSounds)
+		-- fill fonts
+		for name, key in pairs(media and media:HashTable('font') or FONTS) do
+			table.insert( menuFonts, { text = name, value = key, func = SetFont, checked = FontChecked } )
 		end
-		-- refresh zones
-		wipe(menuZones)
-		menuZones[1] = { text = '(+)Add Current Zone', notCheckable = true, func = ZoneAdd }
-		for zone in pairs(config.zones or {}) do
-			menuZones[#menuZones+1] = { text = '(-)'..zone, value = zone, notCheckable = true, func = ZoneDel }
-		end
-		-- refresh fonts
-		if #menuFonts==0 then
-			local media = LibStub("LibSharedMedia-3.0", true)
-			for name, key in pairs(media and media:HashTable('font') or FONTS) do
-				table.insert( menuFonts, { text = name, value = key, func = SetFont, checked = FontChecked } )
+		FixItemsMenu(menuFonts)
+		-- remove non existant sources
+		for _,menu in ipairs( { menuSources, menuMaxSources } ) do
+			for i=#menu,1,-1 do
+				if (menu[i].arg1 =='Atr' and not Atr_GetAuctionBuyout) or (menu[i].arg1 =='TSM' and not TSMAPI_FOUR) then
+					table.remove(menu,i)
+				end
 			end
 		end
-		-- refresh colors
-		for _,o in ipairs(menuTable) do
-			if o.hasColorSwatch then
-				o.r, o.g, o.b, o.opacity = unpack(config.backColor)
-				o.opacity = 1 - o.opacity
-				break
+		-- real show menu
+		self.ShowMenu = function()
+			-- refresh daily money
+			local pre = 'Today'
+			local tim = time()
+			local key = date("%Y/%m/%d",tim)
+			for i=2,8 do
+				local money = config.daily[key] or 0
+				local item  = menuDaily[i] or { notCheckable= true }
+				item.text = string.format('%s: %s', pre, money>0 and FmtMoney(money) or '-' )
+				menuDaily[i] = item
+				tim = tim - 86400
+				key, pre = date("%Y/%m/%d", tim), date("%m/%d", tim)
 			end
+			-- refresh zones
+			wipe(menuZones)
+			menuZones[1] = { text = 'Farming Zones', notCheckable = true, isTitle = true }
+			for zone in pairs(config.zones or {}) do
+				menuZones[#menuZones+1] = { text = '(-)'..zone, value = zone, notCheckable = true, func = ZoneDel }
+			end
+			menuZones[#menuZones+1] = { text = '(+)Add Current Zone', notCheckable = true, func = ZoneAdd }
+			-- refresh colors
+			for _,o in ipairs(menuTable) do
+				if o.hasColorSwatch then
+					o.r, o.g, o.b, o.opacity = unpack(config.backColor)
+					o.opacity = 1 - o.opacity
+					break
+				end
+			end
+			-- open menu
+			EasyMenu(menuTable, menuFrame, "cursor", 0 , 0, "MENU", 1)
 		end
-		EasyMenu(menuTable, menuFrame, "cursor", 0 , 0, "MENU", 1)
+		self:ShowMenu()
 	end
 end
