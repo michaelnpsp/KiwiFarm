@@ -28,12 +28,17 @@ local date = date
 local strfind = strfind
 local floor = math.floor
 local band = bit.band
-local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
 local IsInInstance = IsInInstance
 local GetZoneText = GetZoneText
+local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
 
 local config
 local resets
+
+local combatActive
+local combatTime
+local combatCurKills = 0
+local combatPreKills = 0
 
 -- main frame
 local addon = CreateFrame('Frame', "KiwiFarm", UIParent)
@@ -116,26 +121,34 @@ local function RefreshText()
 	local timeLock  = #resets>0 and resets[1]+3600 or nil
 	local remain    = RESET_MAX-#resets
 	local remainC   = remain>0 and '|cFF00ff00' or '|cFFff0000'
-	-- time of last reset in last hour, or if there are no resets time when the instance was marked as modified (some mob killed)
-	local sReset = (timeLast and curtime-timeLast) or (config.lockspent and curtime-config.lockspent) or 0
+	-- time of last reset in last hour, orange color means the instance was marked as modified (some mob killed)
+	local sReset = (timeLast and curtime-timeLast) or 0 -- (config.lockspent and curtime-config.lockspent) or 0
 	local m1, s1 = floor(sReset/60), sReset%60
+	local spentC  = config.lockspent and '|cFFff8000' or '|cFF00ff00'
 	-- unlock time
 	local sUnlock = timeLock and timeLock-curtime or 0
 	local m2, s2 = floor(sUnlock/60), sUnlock%60
-	-- locked info
-	local lockedC = remain<=0 and (sUnlock>60*5 and '|cFFff0000' or '|cFFff8000') or ''
-	local spentC  = config.lockspent and '|cFFff8000' or '|cFF00ff00'
+	local lockedC = remain<=0 and (sUnlock>60*5 and '|cFFff0000' or '|cFFff8000') or '|cFF00ff00'
 	-- session duration
 	local sSession = curtime - (config.sessionStart or curtime) + (config.sessionDuration or 0)
 	local m0, s0 = floor(sSession/60), sSession%60
+	local h0, m0 = floor(m0/60), m0%60
 	local sessionC = config.sessionStart and '|cFF00ff00' or '|cFFff0000'
 	-- money info
 	local mTotal = config.moneyCash+config.moneyItems
 	local mTotalHour = sSession>0 and floor(mTotal*3600/sSession) or 0
 	-- create display text
-	text:SetFormattedText(
-		"|cFF7FFF72%s|r\n%s%dm %ds|r\n%s%dm %ds|r\n%s%d|r\n%s%dm %ds|r\n%d\n%s\n%s\n%s\n%s",
-		GetZoneText(), sessionC,m0,s0, spentC,m1,s1, remainC,remain, lockedC,m2,s2, config.mobKills or 0, FmtMoney(config.moneyCash),FmtMoney(config.moneyItems),FmtMoney(mTotalHour),FmtMoney(mTotal)
+	text:SetFormattedText("|cFF7FFF72%s|r\n%s%02d:%02d:%02d|r\n(%s%d|r) %s%02d:%02d|r\n(%s%d|r) %s%02d:%02d|r\n(%d) %d\n%s\n%s\n%s\n%s",
+		GetZoneText(),
+		sessionC,h0,m0,s0,
+		remainC, #resets,  spentC, m1,s1,
+		remainC, remain,   lockedC,m2,s2,
+		combatCurKills or combatPreKills,
+		config.mobKills,
+		FmtMoney(config.moneyCash),
+		FmtMoney(config.moneyItems),
+		FmtMoney(mTotalHour),
+		FmtMoney(mTotal)
 	)
 	-- update timer status
 	local stopped = #resets==0 and not config.lockspent and not config.sessionStart
@@ -167,6 +180,8 @@ local function SessionStart(force)
 		config.moneyCash  = config.moneyCash or 0
 		config.moneyItems = config.moneyItems or 0
 		config.mobKills  = config.mobKills or 0
+		addon:RegisterEvent("PLAYER_REGEN_DISABLED")
+		addon:RegisterEvent("PLAYER_REGEN_ENABLED")
 		addon:RegisterEvent("CHAT_MSG_LOOT")
 		addon:RegisterEvent("CHAT_MSG_MONEY")
 		addon:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
@@ -180,6 +195,8 @@ local function SessionStop()
 		local curtime = time()
 		config.sessionDuration = (config.sessionDuration or 0) + (curtime - (config.sessionStart or curtime))
 		config.sessionStart = nil
+		addon:UnregisterEvent("PLAYER_REGEN_DISABLED")
+		addon:UnregisterEvent("PLAYER_REGEN_ENABLED")
 		addon:UnregisterEvent("CHAT_MSG_LOOT")
 		addon:UnregisterEvent("CHAT_MSG_MONEY")
 		addon:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
@@ -193,6 +210,8 @@ local function SessionReset()
 	config.mobKills  = 0
 	config.moneyCash  = 0
 	config.moneyItems = 0
+	wipe(config.moneyByQuality)
+	wipe(config.countByQuality)
 	RefreshText()
 end
 
@@ -237,8 +256,10 @@ function addon:CHAT_MSG_LOOT(event,msg)
 			local money = price*quantity
 			config.moneyItems = config.moneyItems + money
 			RegMoney(money)
+			config.moneyByQuality[rarity] = (config.moneyByQuality[rarity] or 0) + money
+			config.countByQuality[rarity] = (config.countByQuality[rarity] or 0) + quantity
 			if rarity>=2 then -- display only green or superior
-				print( string.format("|cFF7FFF72KiwiFarm:|r looted: %sx%d %s", itemLink, quantity, FmtMoney(money) ) )
+				print( string.format("|cFF7FFF72KiwiFarm:|r looted %sx%d %s", itemLink, quantity, FmtMoney(money) ) )
 			end
 			local soundID = config.soundByRarity[rarity]
 			if soundID then
@@ -261,6 +282,19 @@ do
 			RegMoney(copper)
 		end
 	end
+end
+
+-- combat start
+function addon:PLAYER_REGEN_DISABLED()
+	combatActive = true
+	combatPreKills = combatCurKills or combatPreKills
+	combatCurKills = nil
+	combatTime  = time()
+end
+
+-- combat end
+function addon:PLAYER_REGEN_ENABLED()
+	combatActive = nil
 end
 
 -- zones management
@@ -316,7 +350,8 @@ function addon:COMBAT_LOG_EVENT_UNFILTERED()
 			config.lockspent = time()
 			timer:Play()
 		end
-		config.mobKills = (config.mobKills or 0) + 1
+		config.mobKills = config.mobKills + 1
+		combatCurKills = (combatCurKills or 0) + 1
 	end
 end
 
@@ -342,7 +377,7 @@ local function LayoutFrame()
 	text0:SetJustifyH('LEFT')
 	text0:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
 	text0:SetText(nil)
-	text0:SetText( "|cFF7FFF72Kiwi Farm:|r\nSession duration:\nLast reset:\nRemaining:\nLocked:\nMobs killed:\nGold cash:\nGold items:\nGold/hour:\nGold total:" )
+	text0:SetText( "|cFF7FFF72Kiwi Farm:|r\nSession duration:\nInstance resets:\nLocked status:\nMobs killed:\nGold cash:\nGold items:\nGold/hour:\nGold total:" )
 	-- main frame size
 	addon:SetHeight( text0:GetHeight() + MARGIN*2 )
 	addon:SetWidth( text0:GetWidth() * 1.8 + MARGIN*2 )
@@ -365,8 +400,11 @@ local function Initialize()
 	config.soundByRarity = config.soundByRarity or {}
 	config.priceMaxSource = config.priceMaxSource or {}
 	config.daily = config.daily or {}
+	config.mobKills = config.mobKills or 0
 	config.moneyCash  = config.moneyCash or 0
 	config.moneyItems = config.moneyItems  or 0
+	config.countByQuality = config.countByQuality or {}
+	config.moneyByQuality = config.moneyByQuality or {}
 	config.minimapIcon = config.minimapIcon or { hide = false }
  	resets = config.resets
 	-- minimap icon
@@ -587,7 +625,7 @@ do
 		{ text = 'Kiwi Farm [/kfarm]', notCheckable= true, isTitle = true },
 		{ text = 'Session', notCheckable= true, hasArrow = true, menuList = {
 			{ text = 'Start Session',   notCheckable = true, func = SessionStart },
-			{ text = 'Stop Session',    notCheckable = true, func = SessionStop  },
+			{ text = 'Pause Session',   notCheckable = true, func = SessionStop  },
 			{ text = 'Clear Session',   notCheckable = true, func = SessionReset },
 		} },
 		{ text = 'Gold', notCheckable= true, hasArrow = true, menuList = menuDaily },
