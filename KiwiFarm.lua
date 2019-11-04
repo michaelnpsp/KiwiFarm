@@ -1,6 +1,7 @@
 -- KiwiFarm (C) 2019 MiCHaEL
 local addonName = ...
 
+--
 local RESET_MAX = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC) and 5 or 10
 local MARGIN = 4
 local COLOR_TRANSPARENT = { 0,0,0,0 }
@@ -22,9 +23,26 @@ local SOUNDS = {
 	["Ready Check"] = "Sound/Interface/ReadyCheck.ogg",
 }
 
+local DEFAULTS = {
+	mobKills       = 0,
+	moneyCash      = 0,
+	moneyItems     = 0,
+	countItems     = 0,
+	priceByRarity  = {},
+	soundByRarity  = {},
+	priceMaxSource = {},
+	moneyDaily     = {},
+	moneyByQuality = {},
+	countByQuality = {},
+	textHide       = { quality = true },
+	backColor 	   = { 0, 0, 0, .4 },
+	minimapIcon    = { hide = false },
+}
+
 --
 local time = time
 local date = date
+local unpack = unpack
 local strfind = strfind
 local floor = math.floor
 local band = bit.band
@@ -34,6 +52,7 @@ local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
 
 local config
 local resets
+local textHide
 
 local combatActive
 local combatTime
@@ -65,17 +84,21 @@ timer.animation:SetDuration(1)
 timer:SetLooping("REPEAT")
 
 -- utils
+local function FmtQuality(i)
+	return string.format( "|c%s%s|r", select(4,GetItemQualityColor(i)), _G['ITEM_QUALITY'..i..'_DESC'] )
+end
+
 local function FmtMoney(money)
 	money = money or 0
 	local gold   = floor(  money / COPPER_PER_GOLD )
     local silver = floor( (money % COPPER_PER_GOLD) / COPPER_PER_SILVER )
     local copper = floor(  money % COPPER_PER_SILVER )
-	return string.format( "%d|cffffd70ag|r %d|cffc7c7cfs|r %d|cffeda55fc|r", gold, silver, copper)
+	return string.format( config.moneyFmt or "%d|cffffd70ag|r %d|cffc7c7cfs|r %d|cffeda55fc|r", gold, silver, copper)
 end
 
 local function RegMoney(money)
 	local key = date("%Y/%m/%d")
-	config.daily[key] = (config.daily[key] or 0) + money
+	config.moneyDaily[key] = (config.moneyDaily[key] or 0) + money
 end
 
 local GetItemValue
@@ -109,54 +132,118 @@ do
 	end
 end
 
--- update text
-local function RefreshText()
-	local curtime = time()
-	-- refresh reset data if first reset is +1hour old
-	while (#resets>0 and curtime-resets[1]>3600) or #resets>RESET_MAX do -- remove old resets(>1hour)
-		table.remove(resets,1)
+local PrepareText, RefreshText
+do
+	local text_header
+	local text_mask
+	local data = {}
+	-- prepare text
+	function PrepareText()
+		-- header & session duration
+		text_header =              "|cFF7FFF72KiwiFarm:|r\nSession:\n"
+		text_mask   =	           "|cFF7FFF72%s|r\n"      -- zone
+		text_mask   = text_mask .. "%s%02d:%02d:%02d|r\n"  -- session duration
+		-- instance reset & lock info
+		if not textHide.reset then
+			text_header = text_header .. "Resets:\nLocked:\n"
+			text_mask   = text_mask   .. "(%s%d|r) %s%02d:%02d|r\n"  -- last reset
+			text_mask   = text_mask   .. "(%s%d|r) %s%02d:%02d|r\n"  -- lock time
+		end
+		-- count data
+		if not textHide.count then
+			-- mobs killed
+			text_header = text_header .. "Mobs killed:\n"
+			text_mask   = text_mask   .. "(%d) %d\n"
+			-- items looted
+			text_header = text_header .. "Items looted:\n"
+			text_mask   = text_mask   .. "%d\n"
+		end
+		-- gold cash & items
+		text_header = text_header .. "Gold cash:\nGold items:\n"
+		text_mask   = text_mask   .. "%s\n"  -- money cash
+		text_mask   = text_mask   .. "%s\n"  -- money items
+		-- gold by item quality
+		if not textHide.quality then
+			for i=0,5 do -- gold by qualities (poor to legendary)
+				text_header = text_header .. string.format(" %s\n",FmtQuality(i));
+				text_mask   = text_mask   .. "(%d) %s\n"
+			end
+		end
+		-- gold hour & total
+		text_header = text_header .. "Gold/hour:\nGold total:"
+		text_mask   = text_mask .. "%s\n" -- money per hour
+		text_mask   = text_mask .. "%s" -- money total
+		text0:SetText(text_header)
 	end
-	-- some info
-	local timeLast  = resets[#resets]
-	local timeLock  = #resets>0 and resets[1]+3600 or nil
-	local remain    = RESET_MAX-#resets
-	local remainC   = remain>0 and '|cFF00ff00' or '|cFFff0000'
-	-- time of last reset in last hour, orange color means the instance was marked as modified (some mob killed)
-	local sReset = (timeLast and curtime-timeLast) or 0 -- (config.lockspent and curtime-config.lockspent) or 0
-	local m1, s1 = floor(sReset/60), sReset%60
-	local spentC  = config.lockspent and '|cFFff8000' or '|cFF00ff00'
-	-- unlock time
-	local sUnlock = timeLock and timeLock-curtime or 0
-	local m2, s2 = floor(sUnlock/60), sUnlock%60
-	local lockedC = remain<=0 and (sUnlock>60*5 and '|cFFff0000' or '|cFFff8000') or '|cFF00ff00'
-	-- session duration
-	local sSession = curtime - (config.sessionStart or curtime) + (config.sessionDuration or 0)
-	local m0, s0 = floor(sSession/60), sSession%60
-	local h0, m0 = floor(m0/60), m0%60
-	local sessionC = config.sessionStart and '|cFF00ff00' or '|cFFff0000'
-	-- money info
-	local mTotal = config.moneyCash+config.moneyItems
-	local mTotalHour = sSession>0 and floor(mTotal*3600/sSession) or 0
-	-- create display text
-	text:SetFormattedText("|cFF7FFF72%s|r\n%s%02d:%02d:%02d|r\n(%s%d|r) %s%02d:%02d|r\n(%s%d|r) %s%02d:%02d|r\n(%d) %d\n%s\n%s\n%s\n%s",
-		GetZoneText(),
-		sessionC,h0,m0,s0,
-		remainC, #resets,  spentC, m1,s1,
-		remainC, remain,   lockedC,m2,s2,
-		combatCurKills or combatPreKills,
-		config.mobKills,
-		FmtMoney(config.moneyCash),
-		FmtMoney(config.moneyItems),
-		FmtMoney(mTotalHour),
-		FmtMoney(mTotal)
-	)
-	-- update timer status
-	local stopped = #resets==0 and not config.lockspent and not config.sessionStart
-	if stopped ~= not timer:IsPlaying() then
-		if stopped then
-			timer:Stop()
-		else
-			timer:Play()
+	-- refresh text
+	function RefreshText()
+		local curtime = time()
+		-- refresh reset data if first reset is +1hour old
+		while (#resets>0 and curtime-resets[1]>3600) or #resets>RESET_MAX do -- remove old resets(>1hour)
+			table.remove(resets,1)
+		end
+		-- reset old data
+		wipe(data)
+		-- zone text
+		data[#data+1] = GetZoneText()
+		-- session duration
+		local sSession = curtime - (config.sessionStart or curtime) + (config.sessionDuration or 0)
+		local m0, s0 = floor(sSession/60), sSession%60
+		local h0, m0 = floor(m0/60), m0%60
+		data[#data+1] = config.sessionStart and '|cFF00ff00' or '|cFFff0000'
+		data[#data+1] = h0
+		data[#data+1] = m0
+		data[#data+1] = s0
+		-- reset data
+		if not textHide.reset then
+			local timeLast  = resets[#resets]
+			local timeLock  = #resets>0 and resets[1]+3600 or nil
+			local remain    = RESET_MAX-#resets
+			local sReset = (timeLast and curtime-timeLast) or 0 -- (config.lockspent and curtime-config.lockspent) or 0
+			local sUnlock = timeLock and timeLock-curtime or 0
+			--
+			data[#data+1] = remain>0 and '|cFF00ff00' or '|cFFff0000'
+			data[#data+1] = #resets
+			data[#data+1] = config.lockspent and '|cFFff8000' or '|cFF00ff00'
+			data[#data+1] = floor(sReset/60)
+			data[#data+1] = sReset%60
+			--
+			data[#data+1] = remain>0 and '|cFF00ff00' or '|cFFff0000'
+			data[#data+1] = remain
+			data[#data+1] = remain<=0 and (sUnlock>60*5 and '|cFFff0000' or '|cFFff8000') or '|cFF00ff00'
+			data[#data+1] = floor(sUnlock/60)
+			data[#data+1] = sUnlock%60
+		end
+		-- count data
+		if not textHide.count then
+			-- mob kills
+			data[#data+1] = combatCurKills or combatPreKills
+			data[#data+1] = config.mobKills
+			-- items looted
+			data[#data+1] = config.countItems
+		end
+		-- gold info
+		data[#data+1] = FmtMoney(config.moneyCash)
+		data[#data+1] = FmtMoney(config.moneyItems)
+		if not textHide.quality then
+			for i=0,5 do
+				data[#data+1] = config.countByQuality[i] or 0
+				data[#data+1] = FmtMoney(config.moneyByQuality[i] or 0)
+			end
+		end
+		local total = config.moneyCash+config.moneyItems
+		data[#data+1] = FmtMoney(sSession>0 and floor(total*3600/sSession) or 0)
+		data[#data+1] = FmtMoney(total)
+		-- set text
+		text:SetFormattedText( text_mask, unpack(data) )
+		-- update timer status
+		local stopped = #resets==0 and not config.lockspent and not config.sessionStart
+		if stopped ~= not timer:IsPlaying() then
+			if stopped then
+				timer:Stop()
+			else
+				timer:Play()
+			end
 		end
 	end
 end
@@ -179,7 +266,8 @@ local function SessionStart(force)
 		config.sessionStart = config.sessionStart or time()
 		config.moneyCash  = config.moneyCash or 0
 		config.moneyItems = config.moneyItems or 0
-		config.mobKills  = config.mobKills or 0
+		config.countItems = config.countItems or 0
+		config.mobKills   = config.mobKills or 0
 		addon:RegisterEvent("PLAYER_REGEN_DISABLED")
 		addon:RegisterEvent("PLAYER_REGEN_ENABLED")
 		addon:RegisterEvent("CHAT_MSG_LOOT")
@@ -207,9 +295,10 @@ end
 local function SessionReset()
 	config.sessionStart = config.sessionStart and time() or nil
 	config.sessionDuration = nil
-	config.mobKills  = 0
+	config.mobKills   = 0
 	config.moneyCash  = 0
 	config.moneyItems = 0
+	config.countItems = 0
 	wipe(config.moneyByQuality)
 	wipe(config.countByQuality)
 	RefreshText()
@@ -257,6 +346,7 @@ function addon:CHAT_MSG_LOOT(event,msg)
 			config.moneyItems = config.moneyItems + money
 			RegMoney(money)
 			config.moneyByQuality[rarity] = (config.moneyByQuality[rarity] or 0) + money
+			config.countItems = config.countItems + quantity
 			config.countByQuality[rarity] = (config.countByQuality[rarity] or 0) + quantity
 			if rarity>=2 then -- display only green or superior
 				print( string.format("|cFF7FFF72KiwiFarm:|r looted %sx%d %s", itemLink, quantity, FmtMoney(money) ) )
@@ -362,30 +452,29 @@ local function LayoutFrame()
 	end
 	-- background
 	backTexture:SetColorTexture( unpack(config.backColor or COLOR_TRANSPARENT) )
+	-- text headers
+	text0:ClearAllPoints()
+	text0:SetPoint('TOPLEFT', MARGIN, -MARGIN)
+	text0:SetJustifyH('LEFT')
+	text0:SetJustifyV('TOP')
+	text0:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
+	PrepareText()
 	-- text main data
 	text:ClearAllPoints()
 	text:SetPoint('TOPRIGHT', -MARGIN, -MARGIN)
 	text:SetPoint('TOPLEFT', MARGIN, -MARGIN)
 	text:SetJustifyH('RIGHT')
+	text:SetJustifyV('TOP')
 	text:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
-	local t = text:GetText()
-	text:SetText(nil)
-	text:SetText(t)
-	-- text headers
-	text0:ClearAllPoints()
-	text0:SetPoint('TOPLEFT', MARGIN, -MARGIN)
-	text0:SetJustifyH('LEFT')
-	text0:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
-	text0:SetText(nil)
-	text0:SetText( "|cFF7FFF72Kiwi Farm:|r\nSession duration:\nInstance resets:\nLocked status:\nMobs killed:\nGold cash:\nGold items:\nGold/hour:\nGold total:" )
+	RefreshText()
 	-- main frame size
 	addon:SetHeight( text0:GetHeight() + MARGIN*2 )
-	addon:SetWidth( text0:GetWidth() * 1.8 + MARGIN*2 )
+	addon:SetWidth( config.frameWidth or (text0:GetWidth() * 2.3) + MARGIN*2 )
 end
 
 -- initialize
 local function Initialize()
-	-- database
+	-- database setup
 	local serverKey = GetRealmName()
 	local root = KiwiFarmDB
 	if not root then
@@ -395,18 +484,13 @@ local function Initialize()
 	if not config then
 		config = { resets = {} }; root[serverKey] = config
 	end
-	config.backColor = config.backColor or { 0,0,0,.4 }
-	config.priceByRarity = config.priceByRarity or {}
-	config.soundByRarity = config.soundByRarity or {}
-	config.priceMaxSource = config.priceMaxSource or {}
-	config.daily = config.daily or {}
-	config.mobKills = config.mobKills or 0
-	config.moneyCash  = config.moneyCash or 0
-	config.moneyItems = config.moneyItems  or 0
-	config.countByQuality = config.countByQuality or {}
-	config.moneyByQuality = config.moneyByQuality or {}
-	config.minimapIcon = config.minimapIcon or { hide = false }
+	for k,v in pairs(DEFAULTS) do -- apply missing default values
+		if config[k]==nil then
+			config[k] = v
+		end
+	end
  	resets = config.resets
+	textHide = config.textHide
 	-- minimap icon
 	LibStub("LibDBIcon-1.0"):Register(addonName, LibStub("LibDataBroker-1.1"):NewDataObject(addonName, {
 		type  = "launcher",
@@ -463,26 +547,8 @@ SlashCmdList.KIWIFARM = function(args)
 		addon:Show()
 	elseif arg1 == 'hide' then
 		addon:Hide()
-	elseif arg1 == 'font' then
-		if tonumber(arg2) then
-			config.fontsize = tonumber(arg2)
-		else
-			config.fontname = FONTS[ strlower(strsub(arg2,1,1)) ]
-		end
-		LayoutFrame()
-	elseif arg1 == 'reset' then
-		ResetInstances()
-	elseif arg1 == 'clear' then
-		wipe(resets)
-	elseif arg1 =='zone' then
-		if arg2 == 'clear' then
-			config.zones = nil
-		elseif arg2 == 'add' then
-			local zone = GetZoneText()
-			config.zones = config.zones or {}
-			config.zones[zone] = true
-		end
-		addon:ZONE_CHANGED_NEW_AREA()
+	elseif arg1 == 'config' then
+		addon:ShowMenu()
 	elseif arg1 == 'minimap' then
 		config.minimapIcon.hide = not config.minimapIcon.hide
 		if config.minimapIcon.hide then
@@ -492,39 +558,17 @@ SlashCmdList.KIWIFARM = function(args)
 		end
 	else
 		print("KiwiFarm Classic:")
-		print("  Last Reset: time elapsed from last instance reset.")
-		print("  Remaining: available resets (5/hour max).")
-		print("  Locked: locked duration if all resets are used.")
 		print("  Shift-Click to Reset Instances.")
 		print("Commands:")
-		print("  /kfarm")
 		print("  /kfarm show||hide")
-		print("  /kfarm font size||a||f||s||m")
-		print("  /kfarm zone clear||add  -- clear all zones or add the current zone")
-		print("  /kfarm reset  -- reset instances")
-		print("  /kfarm clear  -- remove all saved resets")
+		print("  /kfarm config")
 		print("  /kfarm minimap -- toggle minimap icon visibility")
-	end
-	RefreshText()
-	print("KiwiFarm setup:")
-	print("  font name: " .. (config.fontname or FONTS.Arial))
-	print("  font size: " .. (config.fontsize or 14))
-	if config.zones then
-		for zone in pairs(config.zones) do
-			print( '  zone: ' .. zone )
-		end
-	end
-	for i,t in ipairs(config.resets) do
-		print( string.format('  reset%d: %s',i, date("%H:%M:%S",t) ) )
 	end
 end
 
 -- config popup menu
 do
 	local menuFrame = CreateFrame("Frame", "KiwiFarmPopupMenu", UIParent, "UIDropDownMenuTemplate")
-	local function FmtQuality(i)
-		return string.format( "|c%s%s|r", select(4,GetItemQualityColor(i)), _G[ 'ITEM_QUALITY'..i..'_DESC'] )
-	end
 	local function SortMenu(menu)
 		table.sort(menu, function(a,b) return a.text<b.text end)
 	end
@@ -550,13 +594,12 @@ do
 	local function SetBackground()
 		backTexture:SetColorTexture( unpack(config.backColor or COLOR_TRANSPARENT) )
 	end
+	local function SetWidth(info)
+		config.frameWidth = info.value~=0 and math.max( (config.frameWidth or addon:GetWidth()) + info.value, 50) or nil
+		LayoutFrame()
+	end
 	local function SetFontSize(info)
-		if info.value~=0 then
-			config.fontsize = (config.fontsize or 14) + info.value
-			if config.fontsize<5 then config.fontsize = 5 end
-		else
-			config.fontsize = 14
-		end
+		config.fontsize = info.value~=0 and math.max( (config.fontsize or 14) + info.value, 5) or 14
 		LayoutFrame()
 	end
 	local function SetFont(info)
@@ -600,10 +643,45 @@ do
 	local function MaxPriceSourceChecked(info)
 		return config.priceMaxSource[info.value]
 	end
+	local function MoneyFmtChecked(info)
+		return info.value == (config.moneyFmt or '')
+	end
+	local function SetMoneyFmt(info)
+		config.moneyFmt = info.value~='' and info.value or nil
+		RefreshText()
+	end
+	local function DisplayChecked(info)
+		return not textHide[info.value]
+	end
+	local function SetDisplay(info)
+		textHide[info.value] = (not textHide[info.value]) or nil
+		PrepareText(); LayoutFrame(); RefreshText()
+	end
 	local menuSounds  = {}
 	local menuFonts   = {}
 	local menuZones   = {}
-	local menuDaily   = { { text = 'Daily Gold Earned', notCheckable= true, isTitle = true } }
+	local menuResets  = {
+		{ text = 'Instance Resets', notCheckable= true, isTitle = true },
+	}
+	local menuGoldDaily  = {
+		{ text = 'Daily Gold Earned', notCheckable= true, isTitle = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
+	}
+	local menuGoldQuality = {
+		{ text = 'Gold by Items Quality', notCheckable= true, isTitle = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
+	}
 	local menuSources = {
 		{ text = 'Vendor Price',              value = 'Vendor',                     checked = PriceChecked, func = SetItemPrice },
 		{ text = 'Auctionator: Market Value', value = 'Atr:DBMarket', arg1 = 'Atr', checked = PriceChecked, func = SetItemPrice },
@@ -623,45 +701,66 @@ do
 	}
 	local menuTable = {
 		{ text = 'Kiwi Farm [/kfarm]', notCheckable= true, isTitle = true },
-		{ text = 'Session', notCheckable= true, hasArrow = true, menuList = {
-			{ text = 'Start Session',   notCheckable = true, func = SessionStart },
-			{ text = 'Pause Session',   notCheckable = true, func = SessionStop  },
-			{ text = 'Clear Session',   notCheckable = true, func = SessionReset },
-		} },
-		{ text = 'Gold', notCheckable= true, hasArrow = true, menuList = menuDaily },
+		{ text = 'Session Start',   notCheckable = true, func = SessionStart },
+		{ text = 'Session Stop',   notCheckable = true, func = SessionStop  },
+		{ text = 'Session Clear',   notCheckable = true, func = SessionReset },
 		{ text = 'Reset Instances', notCheckable = true, func = ResetInstances },
+		{ text = 'Statistics', notCheckable= true, isTitle = true },
+		{ text = 'Gold/Daily',  notCheckable= true, hasArrow = true, menuList = menuGoldDaily },
+		{ text = 'Gold/Qualiy', notCheckable= true, hasArrow = true, menuList = menuGoldQuality },
+		{ text = 'Resets',      notCheckable= true, hasArrow = true, menuList = menuResets },
 		{ text = 'Settings',        notCheckable = true, isTitle = true },
-		{ text = 'Zones',   notCheckable= true, hasArrow = true, menuList = menuZones },
-		{ text = 'Prices', notCheckable = true, hasArrow = true, menuList = {
-			{ text = 'Prices by Quality', notCheckable = true, isTitle = true },
-			{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuSources },
-			{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuSources },
-			{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuSources },
-			{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuSources },
-			{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuSources },
-			{ text = '|cFFc0c000Max Price Sources:|r', notCheckable= true, hasArrow = true, menuList = menuMaxSources }
+		{ text = 'Farming', notCheckable= true, hasArrow = true, menuList = {
+			{ text = 'Farming Settings', notCheckable= true, isTitle = true },
+			{ text = 'Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
+			{ text = 'Prices', notCheckable = true, hasArrow = true, menuList = {
+				{ text = 'Prices by Quality', notCheckable = true, isTitle = true },
+				{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuSources },
+				{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuSources },
+				{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuSources },
+				{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuSources },
+				{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuSources },
+				{ text = '|cFFc0c000Max Price Sources:|r', notCheckable= true, hasArrow = true, menuList = menuMaxSources }
+			} },
+			{ text = 'Sounds', notCheckable = true, hasArrow = true, menuList = {
+				{ text = 'Looted items Sound', notCheckable = true, isTitle = true },
+				{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuSounds },
+				{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuSounds },
+				{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuSounds },
+				{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuSounds },
+				{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuSounds },
+			} },
 		} },
-		{ text = 'Sounds', notCheckable = true, hasArrow = true, menuList = {
-			{ text = 'Looted items Sound', notCheckable = true, isTitle = true },
-			{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuSounds },
-			{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuSounds },
-			{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuSounds },
-			{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuSounds },
-			{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuSounds },
+		{ text = 'Appearance', notCheckable= true, hasArrow = true, menuList = {
+			{ text = 'Appearance Settings', notCheckable= true, isTitle = true },
+			{ text = 'Display Info', notCheckable= true, hasArrow = true, menuList = {
+				{ text = 'Lock&Resets',      value = 'reset',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+				{ text = 'Mobs&Items Count', value = 'count',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+				{ text = 'Gold by Quality',  value = 'quality', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+			} },
+			{ text = 'Money Format', notCheckable = true, hasArrow = true, menuList = {
+				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r 99|cffeda55fc|r', 	value = '', 							   checked = MoneyFmtChecked, func = SetMoneyFmt },
+				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 					value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
+				{ text = '999|cffffd70ag|r', 									value = '%d|cffffd70ag|r', 				   checked = MoneyFmtChecked, func = SetMoneyFmt },
+			} },
+			{ text = 'Frame Width', notCheckable= true, hasArrow = true, menuList = {
+				{ text = 'Increase(+)',   value =  1,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
+				{ text = 'Decrease(-)',   value = -1,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
+				{ text = 'Automatic',      value =  0,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
+			} },
+			{ text = 'Text Font', notCheckable= true, hasArrow = true, menuList = menuFonts },
+			{ text = 'Text Size', notCheckable= true, hasArrow = true, menuList = {
+				{ text = 'Increase(+)',   value =  1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
+				{ text = 'Decrease(-)',   value = -1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
+				{ text = 'Default (14)', value =  0,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
+			} },
+			{
+			  text = 'Background Color', notCheckable= true, hasColorSwatch = true, hasOpacity= true,
+			  swatchFunc = function() local c=config.backColor; c[1],c[2],c[3]=ColorPickerFrame:GetColorRGB(); SetBackground(); end,
+			  opacityFunc= function() config.backColor[4] = 1 - OpacitySliderFrame:GetValue(); SetBackground(); end,
+			  cancelFunc = function(c) local cc=config.backColor; cc[1], cc[2], cc[3], cc[4] = c.r, c.g, c.b, 1-c.opacity; SetBackground(); end,
+			},
 		} },
-		{ text = 'Appearance', notCheckable = true, isTitle = true },
-		{ text = 'Font', notCheckable= true, hasArrow = true, menuList = menuFonts },
-		{ text = 'Font Size', notCheckable= true, hasArrow = true, menuList = {
-			{ text = 'Increase++',   value =  1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
-			{ text = 'Decrease--',   value = -1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
-			{ text = 'Default (14)', value =  0,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
-		} },
-		{
-		  text = 'Background Color', notCheckable= true, hasColorSwatch = true, hasOpacity= true,
-		  swatchFunc = function() local c=config.backColor; c[1],c[2],c[3]=ColorPickerFrame:GetColorRGB(); SetBackground(); end,
-		  opacityFunc= function() config.backColor[4] = 1 - OpacitySliderFrame:GetValue(); SetBackground(); end,
-		  cancelFunc = function(c) local cc=config.backColor; cc[1], cc[2], cc[3], cc[4] = c.r, c.g, c.b, 1-c.opacity; SetBackground(); end,
-		},
 		{ text = 'Hide Window', notCheckable = true, func = function() addon:Hide() end },
 	}
 	function addon:ShowMenu()
@@ -687,17 +786,26 @@ do
 		end
 		-- real show menu
 		self.ShowMenu = function()
+			-- refresh quality money
+			for i=2,6 do
+				menuGoldQuality[i].text = string.format( "%s: %s (%d)", FmtQuality(i-2), FmtMoney(config.moneyByQuality[i] or 0), config.countByQuality[i] or 0)
+			end
 			-- refresh daily money
-			local pre = 'Today'
-			local tim = time()
-			local key = date("%Y/%m/%d",tim)
+			local tim, pre, key, money = time()
 			for i=2,8 do
-				local money = config.daily[key] or 0
-				local item  = menuDaily[i] or { notCheckable= true }
-				item.text = string.format('%s: %s', pre, money>0 and FmtMoney(money) or '-' )
-				menuDaily[i] = item
+				key, pre = date("%Y/%m/%d", tim), pre and date("%m/%d", tim) or 'Today'
+				money = config.moneyDaily[key] or 0
+				menuGoldDaily[i].text = string.format('%s: %s', pre, money>0 and FmtMoney(money) or '-' )
 				tim = tim - 86400
-				key, pre = date("%Y/%m/%d", tim), date("%m/%d", tim)
+			end
+			-- refresh resets
+			for i=1,5 do
+				local item
+				if resets[i] then
+					item = menuResets[i+1] or { notCheckable = true }
+					item.text = date("%H:%M:%S",resets[i])
+				end
+				menuResets[i+1] = item
 			end
 			-- refresh zones
 			wipe(menuZones)
