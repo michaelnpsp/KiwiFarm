@@ -37,6 +37,7 @@ local DEFAULTS = {
 	textHide       = { quality = true },
 	backColor 	   = { 0, 0, 0, .4 },
 	minimapIcon    = { hide = false },
+	framePos       = { anchor = 'TOPLEFT', x = 0, y = 0 },
 }
 
 --
@@ -46,6 +47,7 @@ local unpack = unpack
 local strfind = strfind
 local floor = math.floor
 local band = bit.band
+local strmatch = strmatch
 local IsInInstance = IsInInstance
 local GetZoneText = GetZoneText
 local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
@@ -65,7 +67,11 @@ addon:EnableMouse(true)
 addon:SetMovable(true)
 addon:RegisterForDrag("LeftButton")
 addon:SetScript("OnDragStart", addon.StartMoving)
-addon:SetScript("OnDragStop", addon.StopMovingOrSizing)
+addon:SetScript("OnDragStop", function(self)
+	self:StopMovingOrSizing() -- we are assuming addon frame scale=1 in calculations
+	self:SetUserPlaced(false)
+	self:SavePosition()
+end )
 -- background texture
 local backTexture = addon:CreateTexture()
 backTexture:SetAllPoints()
@@ -96,7 +102,7 @@ local function FmtMoney(money)
 	return string.format( config.moneyFmt or "%d|cffffd70ag|r %d|cffc7c7cfs|r %d|cffeda55fc|r", gold, silver, copper)
 end
 
-local function RegMoney(money)
+local function RegisterMoney(money)
 	local key = date("%Y/%m/%d")
 	config.moneyDaily[key] = (config.moneyDaily[key] or 0) + money
 end
@@ -248,6 +254,20 @@ do
 	end
 end
 
+-- restore main frame position
+function addon:RestorePosition()
+	addon:ClearAllPoints()
+	addon:SetPoint( config.framePos.anchor, UIParent, 'CENTER', config.framePos.x, config.framePos.y )
+end
+
+-- save main frame position
+function addon:SavePosition()
+	local p, cx, cy = config.framePos, UIParent:GetCenter()
+	local x = (p.anchor:find("LEFT")   and self:GetLeft())   or (p.anchor:find("RIGHT") and self:GetRight()) or self:GetLeft()+self:GetWidth()/2
+	local y = (p.anchor:find("BOTTOM") and self:GetBottom()) or (p.anchor:find("TOP")   and self:GetTop())   or self:GetTop() -self:GetHeight()/2
+	p.x, p.y = x-cx, y-cy
+end
+
 -- add reset
 local function AddReset()
 	local curtime = time()
@@ -291,7 +311,7 @@ local function SessionStop()
 	end
 end
 
--- session reset
+-- session clear
 local function SessionReset()
 	config.sessionStart = config.sessionStart and time() or nil
 	config.sessionDuration = nil
@@ -344,7 +364,7 @@ function addon:CHAT_MSG_LOOT(event,msg)
 			local price, rarity = GetItemValue(itemLink)
 			local money = price*quantity
 			config.moneyItems = config.moneyItems + money
-			RegMoney(money)
+			RegisterMoney(money)
 			config.moneyByQuality[rarity] = (config.moneyByQuality[rarity] or 0) + money
 			config.countItems = config.countItems + quantity
 			config.countByQuality[rarity] = (config.countByQuality[rarity] or 0) + quantity
@@ -369,7 +389,7 @@ do
 			msg:gsub("%d+",func)
 			local copper = digits[#digits] + (digits[#digits-1] or 0)*100 + (digits[#digits-2] or 0)*10000
 			config.moneyCash = config.moneyCash + copper
-			RegMoney(copper)
+			RegisterMoney(copper)
 		end
 	end
 end
@@ -447,9 +467,6 @@ end
 
 -- layout main frame
 local function LayoutFrame()
-	if addon:GetNumPoints()==0 then
-		addon:SetPoint("TOPLEFT",UIParent, 'CENTER', 0,0)
-	end
 	-- background
 	backTexture:SetColorTexture( unpack(config.backColor or COLOR_TRANSPARENT) )
 	-- text headers
@@ -515,8 +532,11 @@ local function Initialize()
 	addon:RegisterEvent("CHAT_MSG_SYSTEM")
 	addon:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 	addon:RegisterEvent("PLAYER_LOGOUT")
-	-- init
+	-- frame position
+	addon:RestorePosition()
+	-- frame size & appearance
 	LayoutFrame()
+	-- session
 	if config.sessionStart then
 		SessionStart(true)
 	else
@@ -557,18 +577,31 @@ SlashCmdList.KIWIFARM = function(args)
 			LibStub("LibDBIcon-1.0"):Show(addonName)
 		end
 	else
-		print("KiwiFarm Classic:")
+		print("Kiwi Farm Classic:")
+		print("  Right-Click to display Config Menu.")
 		print("  Shift-Click to Reset Instances.")
 		print("Commands:")
-		print("  /kfarm show||hide")
-		print("  /kfarm config")
-		print("  /kfarm minimap -- toggle minimap icon visibility")
+		print("  /kfarm show     -- show main window")
+		print("  /kfarm hide     -- hide main window")
+ 		print("  /kfarm config   -- display config menu")
+		print("  /kfarm minimap  -- toggle minimap icon visibility")
 	end
 end
 
 -- config popup menu
 do
 	local menuFrame = CreateFrame("Frame", "KiwiFarmPopupMenu", UIParent, "UIDropDownMenuTemplate")
+	local menuColors = {}
+	local function CreateColorItem(text, get, set, key)
+		local item = {
+			text = text, notCheckable = true, hasColorSwatch = true, hasOpacity = true,
+			swatchFunc  = function() local r,g,b,a = get(); r,g,b = ColorPickerFrame:GetColorRGB(); set(r,g,b,a) end,
+			opacityFunc = function() local r,g,b   = get(); set(r,g,b,1-OpacitySliderFrame:GetValue()) end,
+			cancelFunc  = function(c) set(c.r, c.g, c.b, 1-c.opacity) end,
+		}
+		menuColors[item] = get
+		return item
+	end
 	local function SortMenu(menu)
 		table.sort(menu, function(a,b) return a.text<b.text end)
 	end
@@ -605,6 +638,14 @@ do
 	local function SetFont(info)
 		config.fontname = info.value
 		LayoutFrame()
+	end
+	local function AnchorChecked(info)
+		return info.value == config.framePos.anchor
+	end
+	local function SetAnchor(info)
+		config.framePos.anchor = info.value
+		addon:SavePosition()
+		addon:RestorePosition()
 	end
 	local function FontChecked(info)
 		return info.value == (config.fontname or FONTS.Arial)
@@ -657,13 +698,12 @@ do
 		textHide[info.value] = (not textHide[info.value]) or nil
 		PrepareText(); LayoutFrame(); RefreshText()
 	end
-	local menuSounds  = {}
-	local menuFonts   = {}
-	local menuZones   = {}
-	local menuResets  = {
-		{ text = 'Instance Resets', notCheckable= true, isTitle = true },
-	}
-	local menuGoldDaily  = {
+	local menuSounds = {}
+	local menuFonts  = {}
+	local menuZones  = {}
+	local itemResetNone = { text = 'None', notCheckable = true }
+	local menuResets    = { { text = 'Instance Resets', notCheckable= true, isTitle = true } }
+	local menuGoldDaily = {
 		{ text = 'Daily Gold Earned', notCheckable= true, isTitle = true },
 		{ notCheckable = true },
 		{ notCheckable = true },
@@ -712,6 +752,16 @@ do
 		{ text = 'Settings',        notCheckable = true, isTitle = true },
 		{ text = 'Farming', notCheckable= true, hasArrow = true, menuList = {
 			{ text = 'Farming Settings', notCheckable= true, isTitle = true },
+			{ text = 'Display Info', notCheckable= true, hasArrow = true, menuList = {
+				{ text = 'Lock&Resets',      value = 'reset',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+				{ text = 'Mobs&Items Count', value = 'count',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+				{ text = 'Gold by Quality',  value = 'quality', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+			} },
+			{ text = 'Money Format', notCheckable = true, hasArrow = true, menuList = {
+				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r 99|cffeda55fc|r', 	value = '', 							   checked = MoneyFmtChecked, func = SetMoneyFmt },
+				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 					value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
+				{ text = '999|cffffd70ag|r', 									value = '%d|cffffd70ag|r', 				   checked = MoneyFmtChecked, func = SetMoneyFmt },
+			} },
 			{ text = 'Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
 			{ text = 'Prices', notCheckable = true, hasArrow = true, menuList = {
 				{ text = 'Prices by Quality', notCheckable = true, isTitle = true },
@@ -733,20 +783,21 @@ do
 		} },
 		{ text = 'Appearance', notCheckable= true, hasArrow = true, menuList = {
 			{ text = 'Appearance Settings', notCheckable= true, isTitle = true },
-			{ text = 'Display Info', notCheckable= true, hasArrow = true, menuList = {
-				{ text = 'Lock&Resets',      value = 'reset',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
-				{ text = 'Mobs&Items Count', value = 'count',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
-				{ text = 'Gold by Quality',  value = 'quality', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
-			} },
-			{ text = 'Money Format', notCheckable = true, hasArrow = true, menuList = {
-				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r 99|cffeda55fc|r', 	value = '', 							   checked = MoneyFmtChecked, func = SetMoneyFmt },
-				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 					value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
-				{ text = '999|cffffd70ag|r', 									value = '%d|cffffd70ag|r', 				   checked = MoneyFmtChecked, func = SetMoneyFmt },
+			{ text = 'Frame Anchor', notCheckable= true, hasArrow = true, menuList = {
+				{ text = 'Top Left',     value = 'TOPLEFT',     checked = AnchorChecked, func = SetAnchor },
+				{ text = 'Top Right',    value = 'TOPRIGHT',    checked = AnchorChecked, func = SetAnchor },
+				{ text = 'Bottom Left',  value = 'BOTTOMLEFT',  checked = AnchorChecked, func = SetAnchor },
+				{ text = 'Bottom Right', value = 'BOTTOMRIGHT', checked = AnchorChecked, func = SetAnchor },
+				{ text = 'Left',   		 value = 'LEFT',   		checked = AnchorChecked, func = SetAnchor },
+				{ text = 'Right',  		 value = 'RIGHT',  		checked = AnchorChecked, func = SetAnchor },
+				{ text = 'Top',    		 value = 'TOP',    		checked = AnchorChecked, func = SetAnchor },
+				{ text = 'Bottom', 		 value = 'BOTTOM', 		checked = AnchorChecked, func = SetAnchor },
+				{ text = 'Center', 		 value = 'CENTER', 		checked = AnchorChecked, func = SetAnchor },
 			} },
 			{ text = 'Frame Width', notCheckable= true, hasArrow = true, menuList = {
 				{ text = 'Increase(+)',   value =  1,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
 				{ text = 'Decrease(-)',   value = -1,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
-				{ text = 'Automatic',      value =  0,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
+				{ text = 'Default',       value =  0,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
 			} },
 			{ text = 'Text Font', notCheckable= true, hasArrow = true, menuList = menuFonts },
 			{ text = 'Text Size', notCheckable= true, hasArrow = true, menuList = {
@@ -754,12 +805,7 @@ do
 				{ text = 'Decrease(-)',   value = -1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 				{ text = 'Default (14)', value =  0,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 			} },
-			{
-			  text = 'Background Color', notCheckable= true, hasColorSwatch = true, hasOpacity= true,
-			  swatchFunc = function() local c=config.backColor; c[1],c[2],c[3]=ColorPickerFrame:GetColorRGB(); SetBackground(); end,
-			  opacityFunc= function() config.backColor[4] = 1 - OpacitySliderFrame:GetValue(); SetBackground(); end,
-			  cancelFunc = function(c) local cc=config.backColor; cc[1], cc[2], cc[3], cc[4] = c.r, c.g, c.b, 1-c.opacity; SetBackground(); end,
-			},
+			CreateColorItem( 'Background color', function() return unpack(config.backColor) end, function(...) config.backColor = {...}; SetBackground(); end )
 		} },
 		{ text = 'Hide Window', notCheckable = true, func = function() addon:Hide() end },
 	}
@@ -799,13 +845,13 @@ do
 				tim = tim - 86400
 			end
 			-- refresh resets
+			local item = itemResetNone
 			for i=1,5 do
-				local item
 				if resets[i] then
 					item = menuResets[i+1] or { notCheckable = true }
 					item.text = date("%H:%M:%S",resets[i])
 				end
-				menuResets[i+1] = item
+				menuResets[i+1], item = item, nil
 			end
 			-- refresh zones
 			wipe(menuZones)
@@ -815,12 +861,9 @@ do
 			end
 			menuZones[#menuZones+1] = { text = '(+)Add Current Zone', notCheckable = true, func = ZoneAdd }
 			-- refresh colors
-			for _,o in ipairs(menuTable) do
-				if o.hasColorSwatch then
-					o.r, o.g, o.b, o.opacity = unpack(config.backColor)
-					o.opacity = 1 - o.opacity
-					break
-				end
+			for item,get in pairs(menuColors) do
+				item.r, item.g, item.b, item.opacity = get()
+				item.opacity = 1 - item.opacity
 			end
 			-- open menu
 			EasyMenu(menuTable, menuFrame, "cursor", 0 , 0, "MENU", 1)
