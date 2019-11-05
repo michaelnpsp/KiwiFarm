@@ -71,6 +71,7 @@ addon:SetScript("OnDragStop", function(self)
 	self:StopMovingOrSizing() -- we are assuming addon frame scale=1 in calculations
 	self:SetUserPlaced(false)
 	self:SavePosition()
+	self:RestorePosition()
 end )
 -- background texture
 local backTexture = addon:CreateTexture()
@@ -254,20 +255,6 @@ do
 	end
 end
 
--- restore main frame position
-function addon:RestorePosition()
-	addon:ClearAllPoints()
-	addon:SetPoint( config.framePos.anchor, UIParent, 'CENTER', config.framePos.x, config.framePos.y )
-end
-
--- save main frame position
-function addon:SavePosition()
-	local p, cx, cy = config.framePos, UIParent:GetCenter()
-	local x = (p.anchor:find("LEFT")   and self:GetLeft())   or (p.anchor:find("RIGHT") and self:GetRight()) or self:GetLeft()+self:GetWidth()/2
-	local y = (p.anchor:find("BOTTOM") and self:GetBottom()) or (p.anchor:find("TOP")   and self:GetTop())   or self:GetTop() -self:GetHeight()/2
-	p.x, p.y = x-cx, y-cy
-end
-
 -- add reset
 local function AddReset()
 	local curtime = time()
@@ -426,7 +413,7 @@ function addon:ZONE_CHANGED_NEW_AREA()
 			self:Hide()
 		end
 	end
-	if config.sessionStart then -- to track when the instance save becomes dirty (mob killeds)
+	if config.sessionStart then -- to track when the instance save becomes dirty (mobs killed)
 		if ins then
 			self:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
 		else
@@ -463,6 +450,20 @@ function addon:COMBAT_LOG_EVENT_UNFILTERED()
 		config.mobKills = config.mobKills + 1
 		combatCurKills = (combatCurKills or 0) + 1
 	end
+end
+
+-- restore main frame position
+function addon:RestorePosition()
+	addon:ClearAllPoints()
+	addon:SetPoint( config.framePos.anchor, UIParent, 'CENTER', config.framePos.x, config.framePos.y )
+end
+
+-- save main frame position
+function addon:SavePosition()
+	local p, cx, cy = config.framePos, UIParent:GetCenter()
+	local x = (p.anchor:find("LEFT")   and self:GetLeft())   or (p.anchor:find("RIGHT") and self:GetRight()) or self:GetLeft()+self:GetWidth()/2
+	local y = (p.anchor:find("BOTTOM") and self:GetBottom()) or (p.anchor:find("TOP")   and self:GetTop())   or self:GetTop() -self:GetHeight()/2
+	p.x, p.y = x-cx, y-cy
 end
 
 -- layout main frame
@@ -577,9 +578,10 @@ SlashCmdList.KIWIFARM = function(args)
 			LibStub("LibDBIcon-1.0"):Show(addonName)
 		end
 	else
-		print("Kiwi Farm Classic:")
-		print("  Right-Click to display Config Menu.")
-		print("  Shift-Click to Reset Instances.")
+		print("Kiwi Farm:")
+		print("  Right-Click to display config menu.")
+		print("  Shift-Click to reset instances.")
+		print("  Click&Drag to move main frame.")
 		print("Commands:")
 		print("  /kfarm show     -- show main window")
 		print("  /kfarm hide     -- hide main window")
@@ -781,8 +783,8 @@ do
 				{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuSounds },
 			} },
 		} },
-		{ text = 'Appearance', notCheckable= true, hasArrow = true, menuList = {
-			{ text = 'Appearance Settings', notCheckable= true, isTitle = true },
+		{ text = 'Frame', notCheckable= true, hasArrow = true, menuList = {
+			{ text = 'Frame Settings', notCheckable= true, isTitle = true },
 			{ text = 'Frame Anchor', notCheckable= true, hasArrow = true, menuList = {
 				{ text = 'Top Left',     value = 'TOPLEFT',     checked = AnchorChecked, func = SetAnchor },
 				{ text = 'Top Right',    value = 'TOPRIGHT',    checked = AnchorChecked, func = SetAnchor },
