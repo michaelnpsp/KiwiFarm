@@ -91,6 +91,33 @@ timer.animation:SetDuration(1)
 timer:SetLooping("REPEAT")
 
 -- utils
+local ZoneTitle
+do
+	local strcut
+	if GetLocale() == "enUS" or GetLocale() == "enGB" then -- standard cut
+		local strsub = strsub
+		strcut = function(s,c)
+			return strsub(s,1,c)
+		end
+	else -- utf8 cut
+		local strbyte = string.byte
+		strcut = function(s, c)
+			local l, i = #s, 1
+			while c>0 and i<=l do
+				local b = strbyte(s, i)
+				if     b < 192 then	i = i + 1
+				elseif b < 224 then i = i + 2
+				elseif b < 240 then	i = i + 3
+				else				i = i + 4
+				end
+				c = c - 1
+			end
+			return s:sub(1, i-1)
+		end
+	end
+	ZoneTitle = setmetatable( {}, { __index = function(t,k) local v=strcut(k,18); t[k]=v; return v; end } )
+end
+
 local function FmtQuality(i)
 	return string.format( "|c%s%s|r", select(4,GetItemQualityColor(i)), _G['ITEM_QUALITY'..i..'_DESC'] )
 end
@@ -108,37 +135,44 @@ local function RegisterMoney(money)
 	config.moneyDaily[key] = (config.moneyDaily[key] or 0) + money
 end
 
+-- calculate item price
 local GetItemValue
 do
-	local function GetValue(source, itemID, name, class, rarity, level, vendorPrice)
+	local ItemUpgradeInfo
+	local function GetValue(source, itemLink, itemID, name, class, rarity, vendorPrice)
 		local price
-		if source == 'Atr:DBMarket' then -- Auctionator: market
-			price = Atr_GetAuctionBuyout and Atr_GetAuctionBuyout(name)
-		elseif source == 'Atr:Destroy' then -- Auctionator: disenchant
-			price = Atr_CalcDisenchantPrice and Atr_CalcDisenchantPrice(class,rarity,level) -- Atr_GetDisenchantValue() is bugged cannot be used
-		elseif source ~= 'Vendor' then -- TSM4 sources
+		if source == 'Atr:DBMarket' and ItemUpgradeInfo then -- Auctionator: market
+			price = Atr_GetAuctionPrice(name)
+		elseif source == 'Atr:Destroy' and ItemUpgradeInfo then -- Auctionator: disenchant
+			price = Atr_CalcDisenchantPrice(class, rarity, ItemUpgradeInfo:GetUpgradedItemLevel(itemLink)) -- Atr_GetDisenchantValue() is bugged cannot be used
+		elseif source ~= 'Vendor' and TSMAPI_FOUR then -- TSM4 sources
 			price = TSMAPI_FOUR.CustomPrice.GetValue(source, "i:"..itemID)
 		end
 		return price or vendorPrice
 	end
 	function GetItemValue(itemLink)
-		local itemID = strmatch(itemLink, "item:(%d+):") or itemLink
-		local name, link, rarity, level, minLevel, typ, subTyp, stackCount, equipLoc, icon, vendorPrice, class = GetItemInfo(itemLink)
-		local source = config.priceByRarity[rarity or 0]
-		if source == 'MaxPrice' then
-			local price = vendorPrice
-			for src in pairs(config.priceMaxSource) do
-				price = math.max( price, GetValue(src, itemID, name, class, rarity, level, vendorPrice) )
+		ItemUpgradeInfo = Atr_GetAuctionPrice and Atr_CalcDisenchantPrice and LibStub('LibItemUpgradeInfo-1.0',true) -- Check if auctionator is installed
+		GetItemValue = function(itemLink)
+			local itemID = strmatch(itemLink, "item:(%d+):") or itemLink
+			local name, _, rarity, _, _, _, _, _, _, _, vendorPrice, class = GetItemInfo(itemLink)
+			local source = config.priceByRarity[rarity or 0]
+			if source == 'MaxPrice' then
+				local price = vendorPrice
+				for src in pairs(config.priceMaxSource) do
+					price = math.max( price, GetValue(src, itemLink, itemID, name, class, rarity, vendorPrice) )
+				end
+				return price, rarity
+			elseif source then
+				return GetValue(source, itemLink, itemID, name, class, rarity, vendorPrice), rarity
+			else
+				return vendorPrice, rarity
 			end
-			return price, rarity
-		elseif source then
-			return GetValue(source, itemID, name, class, rarity, level, vendorPrice), rarity
-		else
-			return vendorPrice, rarity
 		end
+		return GetItemValue(itemLink)
 	end
 end
 
+-- display farming info
 local PrepareText, RefreshText
 do
 	local text_header
@@ -192,7 +226,7 @@ do
 		-- reset old data
 		wipe(data)
 		-- zone text
-		data[#data+1] = GetZoneText()
+		data[#data+1] = ZoneTitle[ GetZoneText() ]
 		-- session duration
 		local sSession = curtime - (config.sessionStart or curtime) + (config.sessionDuration or 0)
 		local m0, s0 = floor(sSession/60), sSession%60
@@ -355,7 +389,7 @@ function addon:CHAT_MSG_LOOT(event,msg)
 			config.moneyByQuality[rarity] = (config.moneyByQuality[rarity] or 0) + money
 			config.countItems = config.countItems + quantity
 			config.countByQuality[rarity] = (config.countByQuality[rarity] or 0) + quantity
-			if rarity>=2 then -- display only green or superior
+			if rarity>=1 then -- display only green or superior
 				print( string.format("|cFF7FFF72KiwiFarm:|r looted %sx%d %s", itemLink, quantity, FmtMoney(money) ) )
 			end
 			local soundID = config.soundByRarity[rarity]
@@ -412,6 +446,8 @@ function addon:ZONE_CHANGED_NEW_AREA()
 			SessionStop()
 			self:Hide()
 		end
+	else
+		RefreshText()
 	end
 	if config.sessionStart then -- to track when the instance save becomes dirty (mobs killed)
 		if ins then

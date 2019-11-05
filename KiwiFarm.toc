@@ -5,11 +5,12 @@
 # ## Interface: 11302
 #@end-non-retail@
 ## Title: |cFF7FFF72Kiwi|r Farm
-## Notes: Instances Reset & Gold Tracker
-## Author: MiChaeL
+## Notes: Reset & Gold Tracker
+## Author: MiCHaeL
 ## Version: @project-version@
+## X-Curse-Project-ID: 350500
 ## SavedVariables: KiwiFarmDB
-## OptionalDeps: LibSharedMedia-3.0
+## OptionalDeps: LibSharedMedia-3.0, LibItemUpgradeInfo-1.0
 
 Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
 Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
