@@ -1,2 +1,2 @@
 # KiwiFarm
-Resets &amp; gold tracking addon for World of Warcraft Classic
+Resets &amp; gold tracking addon for World of Warcraft
