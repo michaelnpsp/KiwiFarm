@@ -24,20 +24,25 @@ local SOUNDS = {
 }
 
 local DEFAULTS = {
-	mobKills       = 0,
-	moneyCash      = 0,
-	moneyItems     = 0,
-	countItems     = 0,
-	priceByRarity  = {},
-	soundByRarity  = {},
-	priceMaxSource = {},
-	moneyDaily     = {},
-	moneyByQuality = {},
-	countByQuality = {},
-	textHide       = { quality = true },
-	backColor 	   = { 0, 0, 0, .4 },
-	minimapIcon    = { hide = false },
-	framePos       = { anchor = 'TOPLEFT', x = 0, y = 0 },
+	mobKills             = 0,
+	moneyCash            = 0,
+	moneyItems           = 0,
+	countItems           = 0,
+	moneyDaily           = {},
+	moneyByQuality       = {},
+	countByQuality       = {},
+	lootedItems          = {},
+	priceByItem          = {},
+	priceByQuality       = { [0]={}, [1]={}, [2]={}, [3]={}, [4]={}, [5]={}, [6]={}, [7]={}, [8]={}, [9]={} },
+	notifyChatByQuality  = { [0]=nil, [1]=true, [2]=true, [3]=true, [4]=true, [5]=true, [6]=true, [7]=true, [8]=true, [9]=true },
+	notifyChatPrice      = nil,
+	notifySoundByQuality = {},
+	notifySoundByPrice   = nil,
+	notifySoundPrice     = nil,
+	textHide             = { quality=true },
+	backColor 	         = { 0, 0, 0, .4 },
+	minimapIcon          = { hide = false },
+	framePos             = { anchor = 'TOPLEFT', x = 0, y = 0 },
 }
 
 --
@@ -46,10 +51,13 @@ local date = date
 local unpack = unpack
 local strfind = strfind
 local floor = math.floor
+local format = string.format
+local tinsert = tinsert
 local band = bit.band
 local strmatch = strmatch
 local IsInInstance = IsInInstance
 local GetZoneText = GetZoneText
+local GetItemInfo = GetItemInfo
 local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
 
 local config
@@ -68,7 +76,7 @@ addon:SetMovable(true)
 addon:RegisterForDrag("LeftButton")
 addon:SetScript("OnDragStart", addon.StartMoving)
 addon:SetScript("OnDragStop", function(self)
-	self:StopMovingOrSizing() -- we are assuming addon frame scale=1 in calculations
+	self:StopMovingOrSizing()
 	self:SetUserPlaced(false)
 	self:SavePosition()
 	self:RestorePosition()
@@ -119,7 +127,7 @@ do
 end
 
 local function FmtQuality(i)
-	return string.format( "|c%s%s|r", select(4,GetItemQualityColor(i)), _G['ITEM_QUALITY'..i..'_DESC'] )
+	return format( "|c%s%s|r", select(4,GetItemQualityColor(i)), _G['ITEM_QUALITY'..i..'_DESC'] )
 end
 
 local function FmtMoney(money)
@@ -127,7 +135,35 @@ local function FmtMoney(money)
 	local gold   = floor(  money / COPPER_PER_GOLD )
     local silver = floor( (money % COPPER_PER_GOLD) / COPPER_PER_SILVER )
     local copper = floor(  money % COPPER_PER_SILVER )
-	return string.format( config.moneyFmt or "%d|cffffd70ag|r %d|cffc7c7cfs|r %d|cffeda55fc|r", gold, silver, copper)
+	return format( config.moneyFmt or "%d|cffffd70ag|r %d|cffc7c7cfs|r %d|cffeda55fc|r", gold, silver, copper)
+end
+
+local function FmtMoneyShort(money)
+	local str    = ''
+	local gold   = floor(  money / COPPER_PER_GOLD )
+    local silver = floor( (money % COPPER_PER_GOLD) / COPPER_PER_SILVER )
+    local copper = floor(  money % COPPER_PER_SILVER )
+	if silver>0 then str = format( "%s %d|cffc7c7cfs|r", str, silver) end
+	if copper>0 then str = format( "%s %d|cffeda55fc|r", str, copper) end
+	if gold>0 or str=='' then str = format( "%d|cffffd70ag|r%s", gold, str)  end
+	return strtrim(str)
+end
+
+local function FmtMoneyPlain(money)
+	money = money or 0
+	local gold   = floor(  money / COPPER_PER_GOLD )
+    local silver = floor( (money % COPPER_PER_GOLD) / COPPER_PER_SILVER )
+    local copper = floor(  money % COPPER_PER_SILVER )
+	return format( "%dg %ds %dc", gold, silver, copper)
+end
+
+local function String2Copper(str)
+	strs = str:gsub(' ','')
+	local c,s,g = tonumber(strmatch(str,"([%d,.]+)c")), tonumber(strmatch(str,"([%d,.]+)s")), tonumber(strmatch(str,"([%d,.]+)g"))
+	if not (c or s or g) then
+		g = tonumber(str)
+	end
+	return floor( (c or 0) + (s or 0)*100 + (g or 0)*10000 )
 end
 
 local function RegisterMoney(money)
@@ -135,9 +171,20 @@ local function RegisterMoney(money)
 	config.moneyDaily[key] = (config.moneyDaily[key] or 0) + money
 end
 
+local function RegisterItem(itemLink, itemName, quantity, money)
+	local itemData = config.lootedItems[itemLink]
+	if not itemData then
+		itemData = { itemName, 0, 0 }
+		config.lootedItems[itemLink] = itemData
+	end
+	itemData[2] = itemData[2] + quantity
+	itemData[3] = itemData[3] + money
+end
+
 -- calculate item price
-local GetItemValue
+local GetItemPrice
 do
+	local max = math.max
 	local ItemUpgradeInfo
 	local function GetValue(source, itemLink, itemID, name, class, rarity, vendorPrice)
 		local price
@@ -150,25 +197,19 @@ do
 		end
 		return price or vendorPrice
 	end
-	function GetItemValue(itemLink)
+	function GetItemPrice(itemLink)
 		ItemUpgradeInfo = Atr_GetAuctionPrice and Atr_CalcDisenchantPrice and LibStub('LibItemUpgradeInfo-1.0',true) -- Check if auctionator is installed
-		GetItemValue = function(itemLink)
+		GetItemPrice = function(itemLink)
 			local itemID = strmatch(itemLink, "item:(%d+):") or itemLink
 			local name, _, rarity, _, _, _, _, _, _, _, vendorPrice, class = GetItemInfo(itemLink)
-			local source = config.priceByRarity[rarity or 0]
-			if source == 'MaxPrice' then
-				local price = vendorPrice
-				for src in pairs(config.priceMaxSource) do
-					price = math.max( price, GetValue(src, itemLink, itemID, name, class, rarity, vendorPrice) )
-				end
-				return price, rarity
-			elseif source then
-				return GetValue(source, itemLink, itemID, name, class, rarity, vendorPrice), rarity
-			else
-				return vendorPrice, rarity
+			local sources = config.priceByQuality[rarity or 0] or {}
+			local price = vendorPrice
+			for src in pairs(sources) do
+				price = max( price, GetValue(src, itemLink, itemID, name, class, rarity, vendorPrice) )
 			end
+			return price, rarity, name
 		end
-		return GetItemValue(itemLink)
+		return GetItemPrice(itemLink)
 	end
 end
 
@@ -206,7 +247,7 @@ do
 		-- gold by item quality
 		if not textHide.quality then
 			for i=0,5 do -- gold by qualities (poor to legendary)
-				text_header = text_header .. string.format(" %s\n",FmtQuality(i));
+				text_header = text_header .. format(" %s\n",FmtQuality(i));
 				text_mask   = text_mask   .. "(%d) %s\n"
 			end
 		end
@@ -243,7 +284,7 @@ do
 			local sReset = (timeLast and curtime-timeLast) or 0 -- (config.lockspent and curtime-config.lockspent) or 0
 			local sUnlock = timeLock and timeLock-curtime or 0
 			--
-			data[#data+1] = remain>0 and '|cFF00ff00' or '|cFFff0000'
+			data[#data+1] = (remain==RESET_MAX and '|cFF00ff00') or (remain>0 and '|cFFff8000') or '|cFFff0000'
 			data[#data+1] = #resets
 			data[#data+1] = config.lockspent and '|cFFff8000' or '|cFF00ff00'
 			data[#data+1] = floor(sReset/60)
@@ -294,7 +335,7 @@ local function AddReset()
 	local curtime = time()
 	if curtime-(resets[#resets] or 0)>3 then -- ignore reset of additional instances
 		config.lockspent = nil
-		table.insert( resets, curtime )
+		tinsert( resets, curtime )
 		if addon:IsVisible() then
 			RefreshText()
 		end
@@ -340,6 +381,7 @@ local function SessionReset()
 	config.moneyCash  = 0
 	config.moneyItems = 0
 	config.countItems = 0
+	wipe(config.lootedItems)
 	wipe(config.moneyByQuality)
 	wipe(config.countByQuality)
 	RefreshText()
@@ -358,7 +400,7 @@ end)
 addon:SetScript("OnMouseUp", function(self, button)
 	if button == 'RightButton' then
 		addon:ShowMenu()
-	elseif IsShiftKeyDown() then -- reset instances data
+	elseif button == 'LeftButton' and IsShiftKeyDown() then -- reset instances data
 		ResetInstances()
 	end
 end)
@@ -382,17 +424,18 @@ function addon:CHAT_MSG_LOOT(event,msg)
 			itemLink = strmatch(msg, PATTERN_LOOTS)
 		end
 		if itemLink then
-			local price, rarity = GetItemValue(itemLink)
+			local price, rarity, itemName = GetItemPrice(itemLink)
 			local money = price*quantity
-			config.moneyItems = config.moneyItems + money
 			RegisterMoney(money)
+			RegisterItem(itemLink, itemName, quantity, money)
+			config.moneyItems = config.moneyItems + money
 			config.moneyByQuality[rarity] = (config.moneyByQuality[rarity] or 0) + money
 			config.countItems = config.countItems + quantity
 			config.countByQuality[rarity] = (config.countByQuality[rarity] or 0) + quantity
-			if rarity>=1 then -- display only green or superior
-				print( string.format("|cFF7FFF72KiwiFarm:|r looted %sx%d %s", itemLink, quantity, FmtMoney(money) ) )
+			if config.notifyChatByQuality[rarity] or (config.notifyChatPrice and money>=config.notifyChatPrice) then
+				print( format("|cFF7FFF72KiwiFarm:|r looted %sx%d %s", itemLink, quantity, FmtMoneyShort(money) ) )
 			end
-			local soundID = config.soundByRarity[rarity]
+			local soundID = config.notifySoundByQuality[rarity] or (config.notifySoundPrice and money>=config.notifySoundPrice and config.notifySoundByPrice)
 			if soundID then
 				PlaySoundFile(soundID, "master")
 			end
@@ -429,7 +472,7 @@ function addon:PLAYER_REGEN_ENABLED()
 end
 
 -- zones management
-function addon:ZONE_CHANGED_NEW_AREA()
+function addon:ZONE_CHANGED_NEW_AREA(event)
 	local ins,typ = IsInInstance()
 	if ins and #resets>=RESET_MAX then -- locked but inside instance, means locked expired before estimated unlock time
 		table.remove(resets,1)
@@ -446,7 +489,7 @@ function addon:ZONE_CHANGED_NEW_AREA()
 			SessionStop()
 			self:Hide()
 		end
-	else
+	elseif self:IsVisible() then
 		RefreshText()
 	end
 	if config.sessionStart then -- to track when the instance save becomes dirty (mobs killed)
@@ -457,6 +500,7 @@ function addon:ZONE_CHANGED_NEW_AREA()
 		end
 	end
 end
+addon.PLAYER_ENTERING_WORLD = addon.ZONE_CHANGED_NEW_AREA
 
 -- stop session and register automatic reset on player logout
 do
@@ -496,7 +540,7 @@ end
 
 -- save main frame position
 function addon:SavePosition()
-	local p, cx, cy = config.framePos, UIParent:GetCenter()
+	local p, cx, cy = config.framePos, UIParent:GetCenter() -- we are assuming addon frame scale=1 in calculations
 	local x = (p.anchor:find("LEFT")   and self:GetLeft())   or (p.anchor:find("RIGHT") and self:GetRight()) or self:GetLeft()+self:GetWidth()/2
 	local y = (p.anchor:find("BOTTOM") and self:GetBottom()) or (p.anchor:find("TOP")   and self:GetTop())   or self:GetTop() -self:GetHeight()/2
 	p.x, p.y = x-cx, y-cy
@@ -565,9 +609,10 @@ local function Initialize()
 	-- timer
 	timer:SetScript("OnLoop", RefreshText)
 	-- events
-	addon:SetScript('OnEvent', function(self,event,...)	self[event](self,event,...) end)
+	addon:SetScript('OnEvent', function(self,event,...) self[event](self,event,...) end)
 	addon:RegisterEvent("CHAT_MSG_SYSTEM")
 	addon:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+	addon:RegisterEvent("PLAYER_ENTERING_WORLD")
 	addon:RegisterEvent("PLAYER_LOGOUT")
 	-- frame position
 	addon:RestorePosition()
@@ -630,7 +675,7 @@ end
 do
 	local menuFrame = CreateFrame("Frame", "KiwiFarmPopupMenu", UIParent, "UIDropDownMenuTemplate")
 	local menuColors = {}
-	local function CreateColorItem(text, get, set, key)
+	local function COLOR(text, get, set, key)
 		local item = {
 			text = text, notCheckable = true, hasColorSwatch = true, hasOpacity = true,
 			swatchFunc  = function() local r,g,b,a = get(); r,g,b = ColorPickerFrame:GetColorRGB(); set(r,g,b,a) end,
@@ -640,26 +685,32 @@ do
 		menuColors[item] = get
 		return item
 	end
+	local menuTexts = {}
+	local function TEXT(item)
+		menuTexts[item] = item.text
+		return item
+	end
 	local function SortMenu(menu)
 		table.sort(menu, function(a,b) return a.text<b.text end)
 	end
-	local function MenuSplit(menu)
-		SortMenu(menu)
+	local function MenuSplit(menu, field)
+		field = field or 'text'
+		table.sort(menu, function(a,b) return a[field]<b[field] end )
 		local count, items, first, last = #menu
 		if count>28 then
 			for i=1,count do
 				if not items or #items>=28 then
 					if items then
-						menu[#menu].text = strsub(first.text,1,1) .. '-' .. strsub(last.text,1,1)
+						menu[#menu].text = strsub(first[field],1,1) .. '-' .. strsub(last[field],1,1)
 					end
 					items = {}
-					table.insert(menu, { notCheckable= true, hasArrow = true, menuList = items } )
+					tinsert(menu, { notCheckable= true, hasArrow = true, menuList = items } )
 					first = menu[1]
 				end
 				last = table.remove(menu,1)
-				table.insert(items, last)
+				tinsert(items, last)
 			end
-			menu[#menu].text = strsub(first.text,1,1) .. '-' .. strsub(last.text,1,1)
+			menu[#menu].text = strsub(first[field],1,1) .. '-' .. strsub(last[field],1,1)
 		end
 	end
 	local function SetBackground()
@@ -690,12 +741,20 @@ do
 	end
 	local function SetSound(info)
 		local sound, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
-		config.soundByRarity[rarity] = sound~=0 and sound or nil
+		if rarity>=0 then
+			config.notifySoundByQuality[rarity] = sound~=0 and sound or nil
+		else
+			config.notifySoundByPrice = sound~=0 and sound or nil
+		end
 		if sound~=0 then PlaySoundFile(sound, "master") end
 	end
 	local function SoundChecked(info)
 		local sound, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
-		return (config.soundByRarity[rarity] or 0) == sound
+		if rarity>=0 then
+			return (config.notifySoundByQuality[rarity] or 0) == sound
+		else
+			return (config.notifySoundByPrice or 0) == sound
+		end
 	end
 	local function ZoneAdd()
 		local zone = GetZoneText()
@@ -708,19 +767,12 @@ do
 		if not next(config.zones) then config.zones = nil end
 		addon:ZONE_CHANGED_NEW_AREA()
 	end
-	local function SetItemPrice(info)
-		local source, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
-		config.priceByRarity[rarity] = source~='Vendor' and source or nil
+	local function SetQualityPrice(info)
+		local sources = config.priceByQuality[UIDROPDOWNMENU_MENU_VALUE]
+		sources[info.value] = (not sources[info.value]) or nil
  	end
-	local function PriceChecked(info)
-		local source, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
-		return (config.priceByRarity[rarity] or "Vendor") == source
-	end
-	local function SetMaxPriceSource(info)
-		config.priceMaxSource[info.value] = (not config.priceMaxSource[info.value]) or nil
-	end
-	local function MaxPriceSourceChecked(info)
-		return config.priceMaxSource[info.value]
+	local function QualityPriceChecked(info)
+		return config.priceByQuality[UIDROPDOWNMENU_MENU_VALUE][info.value]
 	end
 	local function MoneyFmtChecked(info)
 		return info.value == (config.moneyFmt or '')
@@ -736,9 +788,51 @@ do
 		textHide[info.value] = (not textHide[info.value]) or nil
 		PrepareText(); LayoutFrame(); RefreshText()
 	end
+	local function MinPriceChecked(info)
+		return config[info.arg1]~=nil
+	end
+	local function GetMinPriceText(info)
+		return config[info.arg1] and "Price above: "..FmtMoneyShort(config[info.arg1]) or "Minimum Price"
+	end
+	local function SetMinPrice(info)
+		addon:EditDialog('|cFF7FFF72KiwiFarm|r\n Set the minimum price to display looted items in chat:', FmtMoneyPlain(config[info.arg1]), function(v)
+			v = String2Copper(v)
+			config[info.arg1] = v>0 and v or nil
+		end)
+	end
+	local function ItemPriceChecked(info)
+		local sources = config.priceByItem[UIDROPDOWNMENU_MENU_VALUE]
+		if type(sources)=='table' then
+			return info.arg1=='' or sources[info.value]
+		end
+	end
+	local function SetItemPrice(info)
+		local sources = config.priceByItem[UIDROPDOWNMENU_MENU_VALUE]
+		if type(sources)~='table' then
+			sources = {}; config.priceByItem[UIDROPDOWNMENU_MENU_VALUE] = sources
+		end
+		sources[info.value] = (not sources[info.value]) or nil
+	end
+	local function ItemPriceCustomChecked(info)
+		return type(config.priceByItem[UIDROPDOWNMENU_MENU_VALUE])=='number'
+	end
+	local function SetItemPriceCustom(info)
+		addon:EditDialog('|cFF7FFF72KiwiFarm|r\n Set a custom price for:\n' .. info.value, type(info.arg2)=='number' and FmtMoneyPlain(info.arg2) or '', function(v)
+			v = String2Copper(v)
+			config.priceByItem[info.value] = v>0 and v or nil
+		end)
+	end
+	local function NotifyQualityChecked(info)
+		return config.notifyChatByQuality[info.value]
+	end
+	local function SetNotifyQuality(info)
+		config.notifyChatByQuality[info.value] = (not config.notifyChatByQuality[info.value]) or nil
+	end
 	local menuSounds = {}
 	local menuFonts  = {}
 	local menuZones  = {}
+	local menuLootedItems = {}
+	local menuPriceItems = {}
 	local itemResetNone = { text = 'None', notCheckable = true }
 	local menuResets    = { { text = 'Instance Resets', notCheckable= true, isTitle = true } }
 	local menuGoldDaily = {
@@ -761,21 +855,20 @@ do
 		{ notCheckable = true },
 	}
 	local menuSources = {
-		{ text = 'Vendor Price',              value = 'Vendor',                     checked = PriceChecked, func = SetItemPrice },
-		{ text = 'Auctionator: Market Value', value = 'Atr:DBMarket', arg1 = 'Atr', checked = PriceChecked, func = SetItemPrice },
-		{ text = 'Auctionator: Disenchant',   value = 'Atr:Destroy' , arg1 = 'Atr', checked = PriceChecked, func = SetItemPrice },
-		{ text = 'TSM4: Market Value',        value = 'DBMarket',     arg1 = 'TSM', checked = PriceChecked, func = SetItemPrice },
-		{ text = 'TSM4: Min Buyout',          value = 'DBMinBuyout',  arg1 = 'TSM', checked = PriceChecked, func = SetItemPrice },
-		{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', checked = PriceChecked, func = SetItemPrice },
-		{ text = 'Max Price',                 value = 'MaxPrice',                   checked = PriceChecked, func = SetItemPrice },
+		{ text = 'Vendor Price',              value = 'Vendor (always enabled)',    isNotRadio = true, checked = true },
+		{ text = 'Auctionator: Market Value', value = 'Atr:DBMarket', arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = QualityPriceChecked, func = SetQualityPrice },
+		{ text = 'Auctionator: Disenchant',   value = 'Atr:Destroy' , arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = QualityPriceChecked, func = SetQualityPrice },
+		{ text = 'TSM4: Market Value',        value = 'DBMarket',     arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = QualityPriceChecked, func = SetQualityPrice },
+		{ text = 'TSM4: Min Buyout',          value = 'DBMinBuyout',  arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = QualityPriceChecked, func = SetQualityPrice },
+		{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = QualityPriceChecked, func = SetQualityPrice },
 	}
-	local menuMaxSources = {
-		{ text = 'Vendor Price (Always active)', isNotRadio = true, checked = true },
-		{ text = 'Auctionator: Market Value', value = 'Atr:DBMarket', arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource },
-		{ text = 'Auctionator: Disenchant',   value = 'Atr:Destroy',  arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource },
-		{ text = 'TSM4: Market Value',        value = 'DBMarket',     arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource },
-		{ text = 'TSM4: Min Buyout',          value = 'DBMinBuyout',  arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource },
-		{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = MaxPriceSourceChecked, func = SetMaxPriceSource },
+	local menuItemSources = {
+		{ text = 'Vendor Price',              value = 'Vendor Price', arg1 = "",    isNotRadio = true, checked = ItemPriceChecked, func = SetItemPrice },
+		{ text = 'Auctionator: Market Value', value = 'Atr:DBMarket', arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = ItemPriceChecked, func = SetItemPrice },
+		{ text = 'Auctionator: Disenchant',   value = 'Atr:Destroy' , arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = ItemPriceChecked, func = SetItemPrice },
+		{ text = 'TSM4: Market Value',        value = 'DBMarket',     arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = ItemPriceChecked, func = SetItemPrice },
+		{ text = 'TSM4: Min Buyout',          value = 'DBMinBuyout',  arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = ItemPriceChecked, func = SetItemPrice },
+		{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = ItemPriceChecked, func = SetItemPrice },
 	}
 	local menuTable = {
 		{ text = 'Kiwi Farm [/kfarm]', notCheckable= true, isTitle = true },
@@ -784,8 +877,9 @@ do
 		{ text = 'Session Clear',   notCheckable = true, func = SessionReset },
 		{ text = 'Reset Instances', notCheckable = true, func = ResetInstances },
 		{ text = 'Statistics', notCheckable= true, isTitle = true },
-		{ text = 'Gold/Daily',  notCheckable= true, hasArrow = true, menuList = menuGoldDaily },
-		{ text = 'Gold/Qualiy', notCheckable= true, hasArrow = true, menuList = menuGoldQuality },
+		{ text = 'Looted Items', notCheckable= true, hasArrow = true, menuList = menuLootedItems },
+		{ text = 'Gold by Qualiy', notCheckable= true, hasArrow = true, menuList = menuGoldQuality },
+		{ text = 'Gold Daily',  notCheckable= true, hasArrow = true, menuList = menuGoldDaily },
 		{ text = 'Resets',      notCheckable= true, hasArrow = true, menuList = menuResets },
 		{ text = 'Settings',        notCheckable = true, isTitle = true },
 		{ text = 'Farming', notCheckable= true, hasArrow = true, menuList = {
@@ -800,23 +894,32 @@ do
 				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 					value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
 				{ text = '999|cffffd70ag|r', 									value = '%d|cffffd70ag|r', 				   checked = MoneyFmtChecked, func = SetMoneyFmt },
 			} },
-			{ text = 'Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
-			{ text = 'Prices', notCheckable = true, hasArrow = true, menuList = {
-				{ text = 'Prices by Quality', notCheckable = true, isTitle = true },
+			{ text = 'Price Sources', notCheckable = true, hasArrow = true, menuList = {
 				{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuSources },
 				{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuSources },
 				{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuSources },
 				{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuSources },
 				{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuSources },
-				{ text = '|cFFc0c000Max Price Sources:|r', notCheckable= true, hasArrow = true, menuList = menuMaxSources }
+				{ text = 'Individual Items', notCheckable= true, hasArrow = true, menuList = menuPriceItems },
+
 			} },
-			{ text = 'Sounds', notCheckable = true, hasArrow = true, menuList = {
-				{ text = 'Looted items Sound', notCheckable = true, isTitle = true },
+			{ text = 'Farming Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
+			{ text = 'Notify: Chat', notCheckable = true, hasArrow = true, menuList = {
+				{ text = FmtQuality(0), value = 0, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(1), value = 1, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(2), value = 2, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(3), value = 3, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(4), value = 4, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(5), value = 5, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
+				TEXT({ text = GetMinPriceText, isNotRadio = true, checked = MinPriceChecked, arg1 = "notifyChatPrice", func = SetMinPrice }),
+			} },
+			{ text = 'Notify: Sounds', notCheckable = true, hasArrow = true, menuList = {
 				{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuSounds },
 				{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuSounds },
 				{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuSounds },
 				{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuSounds },
 				{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuSounds },
+				TEXT({ text = GetMinPriceText,	value = -1, notCheckable = true, arg1 = "notifySoundPrice", func = SetMinPrice, hasArrow = true, menuList = menuSounds }),
 			} },
 		} },
 		{ text = 'Frame', notCheckable= true, hasArrow = true, menuList = {
@@ -843,45 +946,58 @@ do
 				{ text = 'Decrease(-)',   value = -1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 				{ text = 'Default (14)', value =  0,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 			} },
-			CreateColorItem( 'Background color', function() return unpack(config.backColor) end, function(...) config.backColor = {...}; SetBackground(); end )
+			COLOR( 'Background color', function() return unpack(config.backColor) end, function(...) config.backColor = {...}; SetBackground(); end )
 		} },
 		{ text = 'Hide Window', notCheckable = true, func = function() addon:Hide() end },
 	}
 	function addon:ShowMenu()
 		local media = LibStub("LibSharedMedia-3.0", true)
 		-- fill sounds
-		table.insert( menuSounds, { text = '[None]', value = 0, func = SetSound, checked = SoundChecked } )
+		tinsert( menuSounds, { text = '[None]', value = 0, func = SetSound, checked = SoundChecked } )
 		for name, key in pairs(SOUNDS) do
-			table.insert( menuSounds, { text = name, value = key, func = SetSound, checked = SoundChecked } )
+			tinsert( menuSounds, { text = name, value = key, func = SetSound, checked = SoundChecked } )
 		end
 		SortMenu(menuSounds)
 		-- fill fonts
 		for name, key in pairs(media and media:HashTable('font') or FONTS) do
-			table.insert( menuFonts, { text = name, value = key, func = SetFont, checked = FontChecked } )
+			tinsert( menuFonts, { text = name, value = key, func = SetFont, checked = FontChecked } )
 		end
 		MenuSplit(menuFonts)
 		-- remove non existant sources
-		for _,menu in ipairs( { menuSources, menuMaxSources } ) do
-			for i=#menu,1,-1 do
-				if (menu[i].arg1 =='Atr' and not Atr_GetAuctionBuyout) or (menu[i].arg1 =='TSM' and not TSMAPI_FOUR) then
-					table.remove(menu,i)
-				end
+		for i=#menuSources,1,-1 do
+			if (menuSources[i].arg1 =='Atr' and not Atr_GetAuctionPrice) or (menuSources[i].arg1 =='TSM' and not TSMAPI_FOUR) then
+				table.remove(menuSources,i)
 			end
 		end
 		-- real show menu
 		self.ShowMenu = function()
 			-- refresh quality money
 			for i=2,6 do
-				menuGoldQuality[i].text = string.format( "%s: %s (%d)", FmtQuality(i-2), FmtMoney(config.moneyByQuality[i] or 0), config.countByQuality[i] or 0)
+				menuGoldQuality[i].text = format( "%s: %s (%d)", FmtQuality(i-2), FmtMoney(config.moneyByQuality[i-2] or 0), config.countByQuality[i-2] or 0)
 			end
 			-- refresh daily money
 			local tim, pre, key, money = time()
 			for i=2,8 do
 				key, pre = date("%Y/%m/%d", tim), pre and date("%m/%d", tim) or 'Today'
 				money = config.moneyDaily[key] or 0
-				menuGoldDaily[i].text = string.format('%s: %s', pre, money>0 and FmtMoney(money) or '-' )
+				menuGoldDaily[i].text = format('%s: %s', pre, money>0 and FmtMoney(money) or '-' )
 				tim = tim - 86400
 			end
+			-- refresh looted items
+			wipe(menuLootedItems)
+			for itemLink, data in pairs(config.lootedItems) do
+				tinsert( menuLootedItems, { text = format("%sx%d %s", itemLink, data[2], FmtMoneyShort(data[3]) ), value = itemLink, arg1 = data[1], notCheckable = true, func = SetItemPriceCustom } )
+			end
+			MenuSplit(menuLootedItems, 'arg1')
+			-- refresh individual items prices
+			wipe(menuPriceItems)
+			for itemLink,sources in pairs(config.priceByItem) do
+				local name = GetItemInfo(itemLink)
+				local price = config.priceByItem[itemLink]
+				local text = type(price)=='number' and format("%s: %s", itemLink, FmtMoneyShort(price)) or itemLink
+				tinsert( menuPriceItems, { text = text, value = itemLink, arg1 = name, arg2 = price, notCheckable = true, func = SetItemPriceCustom, hasArrow = true, menuList = menuItemSources } )
+			end
+			MenuSplit(menuPriceItems, 'arg1')
 			-- refresh resets
 			local item = itemResetNone
 			for i=1,5 do
@@ -893,7 +1009,6 @@ do
 			end
 			-- refresh zones
 			wipe(menuZones)
-			menuZones[1] = { text = 'Farming Zones', notCheckable = true, isTitle = true }
 			for zone in pairs(config.zones or {}) do
 				menuZones[#menuZones+1] = { text = '(-)'..zone, value = zone, notCheckable = true, func = ZoneDel }
 			end
@@ -903,9 +1018,44 @@ do
 				item.r, item.g, item.b, item.opacity = get()
 				item.opacity = 1 - item.opacity
 			end
+			-- refresh dynamic texts
+			for item,get in pairs(menuTexts) do
+				item.text = get(item)
+			end
 			-- open menu
 			EasyMenu(menuTable, menuFrame, "cursor", 0 , 0, "MENU", 1)
 		end
 		self:ShowMenu()
+	end
+end
+
+-- Dialogs
+do
+	local dummy = function() end
+	StaticPopupDialogs["KIWIFARM_DIALOG"] = { timeout = 0, whileDead = 1, hideOnEscape = 1, button1 = ACCEPT, button2 = CANCEL }
+
+	function addon:ShowDialog(message, textDefault, funcAccept, funcCancel, textAccept, textCancel)
+		local t = StaticPopupDialogs["KIWIFARM_DIALOG"]
+		t.OnShow = function (self) if textDefault then self.editBox:SetText(textDefault) end; self:SetFrameStrata("TOOLTIP") end
+		t.OnHide = function(self) self:SetFrameStrata("DIALOG")	end
+		t.hasEditBox = textDefault and true or nil
+		t.text = message
+		t.button1 = funcAccept and (textAccept or ACCEPT) or nil
+		t.button2 = funcCancel and (textCancel or CANCEL) or nil
+		t.OnCancel = funcCancel
+		t.OnAccept = funcAccept and function (self)	funcAccept( textDefault and self.editBox:GetText() ) end or nil
+		StaticPopup_Show ("KIWIFARM_DIALOG")
+	end
+
+	function addon:MessageDialog(message, funcAccept)
+		addon:ShowDialog(message, nil, funcAccept or dummy)
+	end
+
+	function addon:ConfirmDialog(message, funcAccept, funcCancel, textAccept, textCancel)
+		self:ShowDialog(message, nil, funcAccept, funcCancel or dummy, textAccept, textCancel )
+	end
+
+	function addon:EditDialog(message, text, funcAccept, funcCancel)
+		self:ShowDialog(message, text or "", funcAccept, funcCancel or dummy)
 	end
 end
