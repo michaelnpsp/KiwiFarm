@@ -48,6 +48,8 @@ local DEFAULTS = {
 --
 local time = time
 local date = date
+local type = type
+local next = next
 local unpack = unpack
 local strfind = strfind
 local floor = math.floor
@@ -68,6 +70,8 @@ local combatActive
 local combatTime
 local combatCurKills = 0
 local combatPreKills = 0
+
+local timeLootedItems = 0 -- track changes in config.lootedItems table
 
 -- main frame
 local addon = CreateFrame('Frame', "KiwiFarm", UIParent)
@@ -178,33 +182,12 @@ local function RegisterMoney(money)
 	config.moneyDaily[key] = (config.moneyDaily[key] or 0) + money
 end
 
-local function GetItemPriceSource(itemLink, source)
-	local sources  = config.priceByItem[itemLink]
-	return sources and sources[source]
-end
-
-local function SetItemPriceSource(itemLink, source, value)
-	local sources  = config.priceByItem[itemLink]
-	if value then
-		if not sources then
-			sources={}; config.priceByItem[itemLink]=sources;
-		end
-		sources[source] = value
-	elseif sources then
-		sources[source] = nil
-		if not next(sources) then
-			addon:ConfirmDialog( format("%s\n This item has no defined price sources. Do you want to delete this item from the prices list?",itemLink), function()
-				config.priceByItem[itemLink] = nil
-			end)
-		end
-	end
-end
-
 local function RegisterItem(itemLink, itemName, quantity, money)
 	local itemData = config.lootedItems[itemLink]
 	if not itemData then
 		itemData = { 0, 0 }
 		config.lootedItems[itemLink] = itemData
+		timeLootedItems = time()
 	end
 	itemData[1] = itemData[1] + quantity
 	itemData[2] = itemData[2] + money
@@ -215,15 +198,17 @@ local GetItemPrice
 do
 	local max = math.max
 	local ItemUpgradeInfo
-	local function GetValue(source, itemLink, itemID, name, class, rarity, vendorPrice)
+	local function GetValue(source, itemLink, itemID, name, class, rarity, vendorPrice, userPrice)
 		local price
-		if source == 'vendor' then
+		if source == 'user' then
+			price = userPrice
+		elseif source == 'vendor' then
 			price = vendorPrice
 		elseif source == 'Atr:DBMarket' and ItemUpgradeInfo then -- Auctionator: market
 			price = Atr_GetAuctionPrice(name)
 		elseif source == 'Atr:Destroy' and ItemUpgradeInfo then -- Auctionator: disenchant
 			price = Atr_CalcDisenchantPrice(class, rarity, ItemUpgradeInfo:GetUpgradedItemLevel(itemLink)) -- Atr_GetDisenchantValue() is bugged cannot be used
-		elseif source ~= 'Vendor' and TSMAPI_FOUR then -- TSM4 sources
+		elseif TSMAPI_FOUR then -- TSM4 sources
 			price = TSMAPI_FOUR.CustomPrice.GetValue(source, "i:"..itemID)
 		end
 		return price or 0
@@ -235,8 +220,8 @@ do
 			local name, _, rarity, _, _, _, _, _, _, _, vendorPrice, class = GetItemInfo(itemLink)
 			local sources = config.priceByQuality[rarity or 0] or {}
 			local price = 0
-			for src in pairs(sources) do
-				price = max( price, GetValue(src, itemLink, itemID, name, class, rarity, vendorPrice) )
+			for src, user in pairs(sources) do
+				price = max( price, GetValue(src, itemLink, itemID, name, class, rarity, vendorPrice, user) )
 			end
 			return price, rarity, name
 		end
@@ -416,6 +401,7 @@ local function SessionReset()
 	wipe(config.moneyByQuality)
 	wipe(config.countByQuality)
 	RefreshText()
+	timeLootedItems = time()
 end
 
 -- main frame becomes visible
@@ -704,68 +690,80 @@ end
 
 -- config popup menu
 do
+	-- menu main frame
+	local menuFrame = CreateFrame("Frame", "KiwiFarmPopupMenu", UIParent, "UIDropDownMenuTemplate")
 	-- our popup menu management
-	local function EasyMenu_Refresh()
-		local frame = UIDROPDOWNMENU_OPEN_MENU
-		if frame and frame.menuList and frame:IsShown() then
-			local parent, level, value = frame:GetParent(), UIDROPDOWNMENU_MENU_LEVEL, UIDROPDOWNMENU_MENU_VALUE
-			HideDropDownMenu(level)
-			ToggleDropDownMenu(level, value, nil, nil, nil, nil, frame.menuList, parent)
-		end
-	end
-	local function EasyMenu_Initialize( frame, level, menuList )
-		local init = menuList.init
-		if init then
-			menuList.init = not init(menuList) and (menuList.init or init) or nil
-		end
-		for index=1,#menuList do
-			local item = menuList[index]
-			if type(item.text)=='function' then
-				item.textf = item.text
+	local showMenu, refreshMenu, splitMenu, wipeMenu
+	do
+		local function initialize( frame, level, menuList )
+			local init = menuList.init
+			if init then
+				init(menuList)
 			end
-			if item.textf then
-				item.text = item.textf(item)
-			end
-			if item.hasColorSwatch then
-				if not item.swatchFunc then
-					local get, set = item.get, item.set
-					item.swatchFunc  = function() local r,g,b,a = get(item); r,g,b = ColorPickerFrame:GetColorRGB(); set(item, r,g,b,a) end
-					item.opacityFunc = function() local r,g,b   = get(item); set(item, r,g,b,1-OpacitySliderFrame:GetValue()) end
-					item.cancelFunc  = function(c) set(item, c.r, c.g, c.b, 1-c.opacity) end
+			for index=1,#menuList do
+				local item = menuList[index]
+				if type(item.text)=='function' then
+					item.textf = item.text
 				end
-				item.r, item.g, item.b, item.opacity = item.get(item)
-				item.opacity = 1 - item.opacity
-			end
-			item.index = index
-			UIDropDownMenu_AddButton(item,level)
-		end
-	end
-	local function EasyMenu(menuList, menuFrame, anchor, x, y, autoHideDelay )
-		menuFrame.displayMode = "MENU"
-		UIDropDownMenu_Initialize(menuFrame, EasyMenu_Initialize, "MENU", nil, menuList);
-		ToggleDropDownMenu(1, nil, menuFrame, anchor, x, y, menuList, nil, autoHideDelay);
-	end
-	-- misc fucntions
-	local function MenuSplit(menu, field)
-		field = field or 'text'
-		table.sort(menu, function(a,b) return a[field]<b[field] end )
-		local count, items, first, last = #menu
-		if count>28 then
-			for i=1,count do
-				if not items or #items>=28 then
-					if items then
-						menu[#menu].text = strfirstword(first[field]) .. ' - ' .. strfirstword(last[field])
+				if item.textf then
+					item.text = item.textf(item)
+				end
+				if item.hasColorSwatch then
+					if not item.swatchFunc then
+						local get, set = item.get, item.set
+						item.swatchFunc  = function() local r,g,b,a = get(item); r,g,b = ColorPickerFrame:GetColorRGB(); set(item, r,g,b,a) end
+						item.opacityFunc = function() local r,g,b   = get(item); set(item, r,g,b,1-OpacitySliderFrame:GetValue()) end
+						item.cancelFunc  = function(c) set(item, c.r, c.g, c.b, 1-c.opacity) end
 					end
-					items = {}
-					tinsert(menu, { notCheckable= true, hasArrow = true, menuList = items } )
-					first = menu[1]
+					item.r, item.g, item.b, item.opacity = item.get(item)
+					item.opacity = 1 - item.opacity
 				end
-				last = table.remove(menu,1)
-				tinsert(items, last)
+				item.index = index
+				UIDropDownMenu_AddButton(item,level)
 			end
-			menu[#menu].text = strfirstword(first[field]) .. ' - ' .. strfirstword(last[field])
+		end
+		-- clear menu table, maintaining special control fields
+		function wipeMenu(menu)
+			local init = menu.init;	wipe(menu); menu.init = init
+		end
+		-- split a big menu items table in several submenus
+		function splitMenu(menu, field)
+			field = field or 'text'
+			table.sort(menu, function(a,b) return a[field]<b[field] end )
+			local count, items, first, last = #menu
+			if count>28 then
+				for i=1,count do
+					if not items or #items>=28 then
+						if items then
+							menu[#menu].text = strfirstword(first[field]) .. ' - ' .. strfirstword(last[field])
+						end
+						items = {}
+						tinsert(menu, { notCheckable= true, hasArrow = true, menuList = items } )
+						first = menu[1]
+					end
+					last = table.remove(menu,1)
+					tinsert(items, last)
+				end
+				menu[#menu].text = strfirstword(first[field]) .. ' - ' .. strfirstword(last[field])
+			end
+		end
+		-- refresh last open level menu
+		function refreshMenu()
+			local frame = UIDROPDOWNMENU_OPEN_MENU
+			if frame and frame.menuList and frame:IsShown() then
+				local parent, level, value = frame:GetParent(), UIDROPDOWNMENU_MENU_LEVEL, UIDROPDOWNMENU_MENU_VALUE
+				HideDropDownMenu(level)
+				ToggleDropDownMenu(level, value, nil, nil, nil, nil, frame.menuList, parent)
+			end
+		end
+		-- show my popup menu
+		function showMenu(menuList, menuFrame, anchor, x, y, autoHideDelay )
+			menuFrame.displayMode = "MENU"
+			UIDropDownMenu_Initialize(menuFrame, initialize, "MENU", nil, menuList);
+			ToggleDropDownMenu(1, nil, menuFrame, anchor, x, y, menuList, nil, autoHideDelay);
 		end
 	end
+	-- misc functions
 	local function InitPriceSources(menu)
 		for i=#menu,1,-1 do
 			if (menu[i].arg1 =='Atr' and not Atr_GetAuctionPrice) or (menu[i].arg1 =='TSM' and not TSMAPI_FOUR) then
@@ -826,203 +824,247 @@ do
 		config.notifyChatByQuality[info.value] = (not config.notifyChatByQuality[info.value]) or nil
 	end
 	-- menu: quality sources
-	local function SetQualityPrice(info)
-		local sources = config.priceByQuality[UIDROPDOWNMENU_MENU_VALUE]
-		sources[info.value] = (not sources[info.value]) or nil
- 	end
-	local function QualityPriceChecked(info)
-		return config.priceByQuality[UIDROPDOWNMENU_MENU_VALUE][info.value]
-	end
-	local menuSources = {
-		{ text = 'Vendor Price',              value = 'vendor',                     isNotRadio = true, keepShownOnClick = 1, checked = QualityPriceChecked, func = SetQualityPrice },
-		{ text = 'Auctionator: Market Value', value = 'Atr:DBMarket', arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = QualityPriceChecked, func = SetQualityPrice },
-		{ text = 'Auctionator: Disenchant',   value = 'Atr:Destroy' , arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = QualityPriceChecked, func = SetQualityPrice },
-		{ text = 'TSM4: Market Value',        value = 'DBMarket',     arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = QualityPriceChecked, func = SetQualityPrice },
-		{ text = 'TSM4: Min Buyout',          value = 'DBMinBuyout',  arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = QualityPriceChecked, func = SetQualityPrice },
-		{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = QualityPriceChecked, func = SetQualityPrice },
-		init = InitPriceSources
-	}
-	-- menu: item sources
-	local function ItemPriceChecked(info)
-		return info.arg=='' or GetItemPriceSource( UIDROPDOWNMENU_MENU_VALUE, info.value)
-	end
-	local function SetItemPrice(info)
-		SetItemPriceSource( UIDROPDOWNMENU_MENU_VALUE, info.value , not GetItemPriceSource(UIDROPDOWNMENU_MENU_VALUE, info.value) )
-	end
-	local function ItemPriceCustomChecked(info)
-		return GetItemPriceSource(UIDROPDOWNMENU_MENU_VALUE,'user')
-	end
-	local function SetItemPriceCustom(info)
-		local itemLink = UIDROPDOWNMENU_MENU_VALUE
-		local price    = FmtMoneyPlain( GetItemPriceSource(itemLink,'user') ) or ''
-		addon:EditDialog('|cFF7FFF72KiwiFarm|r\n Set a custom price for:\n' .. itemLink, price, function(v)
-			SetItemPriceSource(itemLink, 'user',  String2Copper(v))
-		end)
-	end
-	local function GetItemPriceCustomText(info)
-		local price = GetItemPriceSource(UIDROPDOWNMENU_MENU_VALUE,'user')
-		return format( 'Price: %s', price and FmtMoneyShort(price) or 'Not Defined')
-	end
-	local menuItemSources = {
-		{ text = GetItemPriceCustomText,	  value = 'user',         				isNotRadio = true, keepShownOnClick = 1, checked = ItemPriceChecked, func = SetItemPriceCustom },
-		{ text = 'Vendor Price',              value = 'vendor',                     isNotRadio = true, keepShownOnClick = 1, checked = ItemPriceChecked, func = SetItemPrice },
-		{ text = 'Auctionator: Market Value', value = 'Atr:DBMarket', arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = ItemPriceChecked, func = SetItemPrice },
-		{ text = 'Auctionator: Disenchant',   value = 'Atr:Destroy' , arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = ItemPriceChecked, func = SetItemPrice },
-		{ text = 'TSM4: Market Value',        value = 'DBMarket',     arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = ItemPriceChecked, func = SetItemPrice },
-		{ text = 'TSM4: Min Buyout',          value = 'DBMinBuyout',  arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = ItemPriceChecked, func = SetItemPrice },
-		{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = ItemPriceChecked, func = SetItemPrice },
-		init = InitPriceSources,
-	}
-	-- menu: individal items prices
-	local menuPriceItems = { init = function(menu)
-		wipe(menu)
-		for itemLink,sources in pairs(config.priceByItem) do
-			local name = GetItemInfo(itemLink) or itemLink
-			tinsert( menu, { text = itemLink, value = itemLink, arg1 = name, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
+	local menuQualitySources
+	do
+		local function checked(info)
+			return config.priceByQuality[UIDROPDOWNMENU_MENU_VALUE][info.value]
 		end
-		MenuSplit(menu, 'arg1')
-	end	}
+		local function set(info)
+			local sources = config.priceByQuality[UIDROPDOWNMENU_MENU_VALUE]
+			sources[info.value] = (not sources[info.value]) or nil
+		end
+		menuQualitySources = {
+			{ text = 'Vendor Price',              value = 'vendor',                     isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = 'Auctionator: Market Value', value = 'Atr:DBMarket', arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = 'Auctionator: Disenchant',   value = 'Atr:Destroy' , arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = 'TSM4: Market Value',        value = 'DBMarket',     arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = 'TSM4: Min Buyout',          value = 'DBMinBuyout',  arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			init = InitPriceSources
+		}
+	end
+	-- menus: item sources, price sources
+	local menuPriceItems, menuItemSources
+	do
+		local function setItemPriceSource(itemLink, source, value)
+			local sources = config.priceByItem[itemLink]
+			if value then
+				if not sources then
+					sources = {}; config.priceByItem[itemLink] = sources
+					wipeMenu(menuPriceItems)
+				end
+				sources[source] = value
+			elseif sources then
+				sources[source] = nil
+				if not next(sources) then
+					C_Timer.After(.1, function()
+						addon:ConfirmDialog( format("%s\nThis item has no defined price. Do you want to delete this item from the price source list?",itemLink), function()
+							config.priceByItem[itemLink] = nil
+							wipeMenu(menuPriceItems)
+						end )
+					end )
+				end
+			end
+		end
+		local function getItemPriceSource(itemLink, source)
+			local sources  = config.priceByItem[itemLink]
+			return sources and sources[source]
+		end
+		local function checked(info)
+			return getItemPriceSource(UIDROPDOWNMENU_MENU_VALUE, info.value)
+		end
+		local function set(info)
+			local itemLink, empty = UIDROPDOWNMENU_MENU_VALUE
+			if info.value=='user' then
+				local price    = FmtMoneyPlain( getItemPriceSource(itemLink,'user') ) or ''
+				addon:EditDialog('|cFF7FFF72KiwiFarm|r\n Set a custom price for:\n' .. itemLink, price, function(v)
+					setItemPriceSource(itemLink, 'user', String2Copper(v))
+				end)
+			else
+				setItemPriceSource( itemLink, info.value , not getItemPriceSource(itemLink, info.value) )
+			end
+		end
+		local function getText(info)
+			local price = getItemPriceSource(UIDROPDOWNMENU_MENU_VALUE,'user')
+			return format( 'Price: %s', price and FmtMoneyShort(price) or 'Not Defined')
+		end
+		-- menu: item price sources
+		menuItemSources = {
+			{ text = getText,	  				  value = 'user',         				isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = 'Vendor Price',              value = 'vendor',                     isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = 'Auctionator: Market Value', value = 'Atr:DBMarket', arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = 'Auctionator: Disenchant',   value = 'Atr:Destroy' , arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = 'TSM4: Market Value',        value = 'DBMarket',     arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = 'TSM4: Min Buyout',          value = 'DBMinBuyout',  arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			init = InitPriceSources,
+		}
+		-- menu: individual items prices
+		menuPriceItems = { init = function(menu)
+			if not menu[1] then
+				wipeMenu(menu)
+				for itemLink,sources in pairs(config.priceByItem) do
+					local name = strmatch(itemLink, '%|h%[(.+)%]%|h')
+					tinsert( menu, { text = itemLink, value = itemLink, arg1 = name, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
+				end
+				splitMenu(menu, 'arg1')
+			end
+		end	}
+	end
+	-- menu: looted items
+	local menuLootedItems
+	do
+		local function getText(info)
+			local data = config.lootedItems[info.value]
+			return data and format("%sx%d %s", info.value, data[1], FmtMoneyShort(data[2])) or info.value
+		end
+		menuLootedItems = { init = function(menu)
+			if timeLootedItems>(menu.time or -1) then
+				wipeMenu(menu)
+				for itemLink, data in pairs(config.lootedItems) do
+					local name = strmatch(itemLink, '%|h%[(.+)%]%|h')
+					tinsert( menu, { text = getText, value = itemLink, arg1 = name, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
+				end
+				splitMenu(menu, 'arg1')
+				menu.time = timeLootedItems
+			end
+		end }
+	end
 	-- menu: zones
-	local function ZoneAdd()
-		local zone = GetZoneText()
-		config.zones = config.zones or {}
-		config.zones[zone] = true
-		addon:ZONE_CHANGED_NEW_AREA()
-	end
-	local function ZoneDel(info)
-		config.zones[info.value] = nil
-		if not next(config.zones) then config.zones = nil end
-		addon:ZONE_CHANGED_NEW_AREA()
-	end
-	local menuZones = { init = function(menu)
-		wipe(menu)
-		for zone in pairs(config.zones or {}) do
-			menu[#menu+1] = { text = '(-)'..zone, value = zone, notCheckable = true, func = ZoneDel }
+	local menuZones
+	do
+		local function ZoneAdd()
+			local zone = GetZoneText()
+			config.zones = config.zones or {}
+			config.zones[zone] = true
+			addon:ZONE_CHANGED_NEW_AREA()
+			wipeMenu(menuZones)
 		end
-		menu[#menu+1] = { text = '(+)Add Current Zone', notCheckable = true, func = ZoneAdd }
-	end	}
+		local function ZoneDel(info)
+			config.zones[info.value] = nil
+			if not next(config.zones) then config.zones = nil end
+			addon:ZONE_CHANGED_NEW_AREA()
+			wipeMenu(menuZones)
+		end
+		menuZones = { init = function(menu)
+			if not menu[1] then
+				for zone in pairs(config.zones or {}) do
+					menu[#menu+1] = { text = '(-)'..zone, value = zone, notCheckable = true, func = ZoneDel }
+				end
+				menu[#menu+1] = { text = '(+)Add Current Zone', notCheckable = true, func = ZoneAdd }
+			end
+		end	}
+	end
 	-- menu: resets
 	local menuResets = { init = function(menu)
 		local item = { text = 'None', notCheckable = true }
 		for i=1,5 do
 			if resets[i] then
-				item = menu[i+1] or { notCheckable = true }
+				item = menu[i] or { notCheckable = true }
 				item.text = date("%H:%M:%S",resets[i])
 			end
-			menu[i+1], item = item, nil
+			menu[i], item = item, nil
 		end
 	end	}
 	-- menu: gold earned by item quality
-	local menuGoldQuality = {
-		{ text = 'Gold by Items Quality', notCheckable= true, isTitle = true },
-		init = function(menu)
-			for i=2,6 do
-				menu[i] = menu[i] or { notCheckable = true }
-				menu[i].text = format( "%s: %s (%d)", FmtQuality(i-2), FmtMoney(config.moneyByQuality[i-2] or 0), config.countByQuality[i-2] or 0)
-			end
-		end,
-	}
+	local menuGoldQuality = { init = function(menu)
+		for i=1,5 do
+			menu[i] = menu[i] or { notCheckable = true }
+			menu[i].text = format( "%s: %s (%d)", FmtQuality(i-1), FmtMoney(config.moneyByQuality[i-1] or 0), config.countByQuality[i-1] or 0)
+		end
+	end }
 	-- menu: gold earned by day
-	local menuGoldDaily = {
-		{ text = 'Daily Gold Earned', notCheckable= true, isTitle = true },
-		init = function(menu)
-			local tim, pre, key, money = time()
-			for i=2,8 do
-				menu[i] = menu[i] or { notCheckable = true }
-				key, pre = date("%Y/%m/%d", tim), pre and date("%m/%d", tim) or 'Today'
-				money = config.moneyDaily[key] or 0
-				menu[i].text = format('%s: %s', pre, money>0 and FmtMoney(money) or '-' )
-				tim = tim - 86400
-			end
-		end,
-	}
-	-- menu: looted items
-	local menuLootedItems = { init = function(menu)
-		wipe(menu)
-		for itemLink, data in pairs(config.lootedItems) do
-			local text = format("%sx%d %s", itemLink, data[1], FmtMoneyShort(data[2]) )
-			local name = GetItemInfo(itemLink) or itemLink
-			tinsert( menu, { text = text, value = itemLink, arg1 = name, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
+	local menuGoldDaily = {	init = function(menu)
+		local tim, pre, key, money = time()
+		for i=1,7 do
+			menu[i] = menu[i] or { notCheckable = true }
+			key, pre = date("%Y/%m/%d", tim), pre and date("%m/%d", tim) or 'Today'
+			money = config.moneyDaily[key] or 0
+			menu[i].text = format('%s: %s', pre, money>0 and FmtMoney(money) or '-' )
+			tim = tim - 86400
 		end
-		MenuSplit(menu, 'arg1')
-	end }
+	end	}
 	-- menu: sounds
-	local function SetSound(info)
-		local sound, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
-		if rarity>=0 then
-			config.notifySoundByQuality[rarity] = sound~=0 and sound or nil
-		else
-			config.notifySoundByPrice = sound~=0 and sound or nil
+	local menuSounds
+	do
+		local function set(info)
+			local sound, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
+			if rarity>=0 then
+				config.notifySoundByQuality[rarity] = sound~=0 and sound or nil
+			else
+				config.notifySoundByPrice = sound~=0 and sound or nil
+			end
+			if sound~=0 then PlaySoundFile(sound, "master") end
 		end
-		if sound~=0 then PlaySoundFile(sound, "master") end
+		local function checked(info)
+			local sound, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
+			if rarity>=0 then
+				return (config.notifySoundByQuality[rarity] or 0) == sound
+			else
+				return (config.notifySoundByPrice or 0) == sound
+			end
+		end
+		menuSounds = { init = function(menu)
+			tinsert( menu, { text = '[None]', value = 0, func = set, checked = checked } )
+			for name, key in pairs(SOUNDS) do
+				tinsert( menu, { text = name, value = key, func = set, checked = checked } )
+			end
+			table.sort(menu, function(a,b) return a.text<b.text end)
+			menu.init = nil -- do not call this init function anymore
+		end }
 	end
-	local function SoundChecked(info)
-		local sound, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
-		if rarity>=0 then
-			return (config.notifySoundByQuality[rarity] or 0) == sound
-		else
-			return (config.notifySoundByPrice or 0) == sound
-		end
-	end
-	local menuSounds = { init = function(menu)
-		tinsert( menu, { text = '[None]', value = 0, func = SetSound, checked = SoundChecked } )
-		for name, key in pairs(SOUNDS) do
-			tinsert( menu, { text = name, value = key, func = SetSound, checked = SoundChecked } )
-		end
-		table.sort(menu, function(a,b) return a.text<b.text end)
-		return true -- means do not call this init function anymore
-	end }
 	-- menu: fonts
-	local function SetFont(info)
-		config.fontname = info.value
-		LayoutFrame()
-	end
-	local function FontChecked(info)
-		return info.value == (config.fontname or FONTS.Arial)
-	end
-	local menuFonts  = { init = function(menu)
-		local media = LibStub("LibSharedMedia-3.0", true)
-		for name, key in pairs(media and media:HashTable('font') or FONTS) do
-			tinsert( menu, { text = name, value = key, func = SetFont, checked = FontChecked } )
+	local menuFonts
+	do
+		local function set(info)
+			config.fontname = info.value; LayoutFrame()
 		end
-		MenuSplit(menu)
-		return true -- means do not call this init function anymore
-	end }
+		local function checked(info)
+			return info.value == (config.fontname or FONTS.Arial)
+		end
+		menuFonts  = { init = function(menu)
+			local media = LibStub("LibSharedMedia-3.0", true)
+			for name, key in pairs(media and media:HashTable('font') or FONTS) do
+				tinsert( menu, { text = name, value = key, func = set, checked = checked } )
+			end
+			splitMenu(menu)
+			menu.init = nil -- do not call this init function anymore
+		end }
+	end
 	-- menu: main
-	local menuTable = {
-		{ text = 'Kiwi Farm [/kfarm]', notCheckable= true, isTitle = true },
-		{ text = 'Session Start',   notCheckable = true, func = SessionStart },
-		{ text = 'Session Stop',   notCheckable = true, func = SessionStop  },
-		{ text = 'Session Clear',   notCheckable = true, func = SessionReset },
-		{ text = 'Reset Instances', notCheckable = true, func = ResetInstances },
-		{ text = 'Statistics', notCheckable= true, isTitle = true },
-		{ text = 'Looted Items', notCheckable= true, hasArrow = true, menuList = menuLootedItems },
-		{ text = 'Gold by Qualiy', notCheckable= true, hasArrow = true, menuList = menuGoldQuality },
-		{ text = 'Gold Daily',  notCheckable= true, hasArrow = true, menuList = menuGoldDaily },
-		{ text = 'Resets',      notCheckable= true, hasArrow = true, menuList = menuResets },
-		{ text = 'Settings',        notCheckable = true, isTitle = true },
+	local menuMain = {
+		{ text = 'Kiwi Farm [/kfarm]', notCheckable = true, isTitle = true },
+		{ text = 'Session Start',      notCheckable = true, func = SessionStart },
+		{ text = 'Session Stop',       notCheckable = true, func = SessionStop  },
+		{ text = 'Session Clear',      notCheckable = true, func = SessionReset },
+		{ text = 'Reset Instances',    notCheckable = true, func = ResetInstances },
+		{ text = 'Statistics',         notCheckable = true, isTitle = true },
+		{ text = 'Looted Items',       notCheckable = true, hasArrow = true, menuList = menuLootedItems },
+		{ text = 'Gold by Qualiy',     notCheckable = true, hasArrow = true, menuList = menuGoldQuality },
+		{ text = 'Gold by Day',        notCheckable = true, hasArrow = true, menuList = menuGoldDaily },
+		{ text = 'Resets',             notCheckable = true, hasArrow = true, menuList = menuResets },
+		{ text = 'Settings',           notCheckable = true, isTitle = true },
 		{ text = 'Farming', notCheckable= true, hasArrow = true, menuList = {
-			{ text = 'Farming Settings', notCheckable= true, isTitle = true },
 			{ text = 'Display Info', notCheckable= true, hasArrow = true, menuList = {
 				{ text = 'Lock&Resets',      value = 'reset',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 				{ text = 'Mobs&Items Count', value = 'count',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 				{ text = 'Gold by Quality',  value = 'quality', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 			} },
+			{ text = 'Price Sources', notCheckable = true, hasArrow = true, menuList = {
+				{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
+				{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
+				{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
+				{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
+				{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
+				{ text = 'Individual Items', notCheckable= true, hasArrow = true, menuList = menuPriceItems },
+
+			} },
+			{ text = 'Farming Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
 			{ text = 'Money Format', notCheckable = true, hasArrow = true, menuList = {
 				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r 99|cffeda55fc|r', 	value = '', 							   checked = MoneyFmtChecked, func = SetMoneyFmt },
 				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 					value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
 				{ text = '999|cffffd70ag|r', 									value = '%d|cffffd70ag|r', 				   checked = MoneyFmtChecked, func = SetMoneyFmt },
 			} },
-			{ text = 'Price Sources', notCheckable = true, hasArrow = true, menuList = {
-				{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuSources },
-				{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuSources },
-				{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuSources },
-				{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuSources },
-				{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuSources },
-				{ text = 'Individual Items', notCheckable= true, hasArrow = true, menuList = menuPriceItems },
-
-			} },
-			{ text = 'Farming Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
 			{ text = 'Notify: Chat', notCheckable = true, hasArrow = true, menuList = {
 				{ text = FmtQuality(0), value = 0, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
 				{ text = FmtQuality(1), value = 1, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
@@ -1042,7 +1084,6 @@ do
 			} },
 		} },
 		{ text = 'Frame', notCheckable= true, hasArrow = true, menuList = {
-			{ text = 'Frame Settings', notCheckable= true, isTitle = true },
 			{ text = 'Frame Anchor', notCheckable= true, hasArrow = true, menuList = {
 				{ text = 'Top Left',     value = 'TOPLEFT',     checked = AnchorChecked, func = SetAnchor },
 				{ text = 'Top Right',    value = 'TOPRIGHT',    checked = AnchorChecked, func = SetAnchor },
@@ -1065,13 +1106,12 @@ do
 				{ text = 'Decrease(-)',  value = -1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 				{ text = 'Default (14)', value =  0,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 			} },
-			{ text ='Background color', notCheckable = true, hasColorSwatch = true, hasOpacity = true, get = function() return unpack(config.backColor) end, set = function(info, ...) config.backColor = {...}; SetBackground(); end }
+			{ text ='Background color ', notCheckable = true, hasColorSwatch = true, hasOpacity = true, get = function() return unpack(config.backColor) end, set = function(info, ...) config.backColor = {...}; SetBackground(); end }
 		} },
 		{ text = 'Hide Window', notCheckable = true, func = function() addon:Hide() end },
 	}
-	local menuFrame = CreateFrame("Frame", "KiwiFarmPopupMenu", UIParent, "UIDropDownMenuTemplate")
 	function addon:ShowMenu()
-		EasyMenu(menuTable, menuFrame, "cursor", 0 , 0, 1)
+		showMenu(menuMain, menuFrame, "cursor", 0 , 0, 5)
 	end
 end
 
