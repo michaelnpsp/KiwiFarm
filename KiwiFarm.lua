@@ -218,7 +218,7 @@ do
 		GetItemPrice = function(itemLink)
 			local itemID = strmatch(itemLink, "item:(%d+):") or itemLink
 			local name, _, rarity, _, _, _, _, _, _, _, vendorPrice, class = GetItemInfo(itemLink)
-			local sources = config.priceByQuality[rarity or 0] or {}
+			local sources = config.priceByItem[itemLink] or config.priceByQuality[rarity or 0] or {}
 			local price = 0
 			for src, user in pairs(sources) do
 				price = max( price, GetValue(src, itemLink, itemID, name, class, rarity, vendorPrice, user) )
@@ -1050,7 +1050,7 @@ do
 				{ text = 'Mobs&Items Count', value = 'count',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 				{ text = 'Gold by Quality',  value = 'quality', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 			} },
-			{ text = 'Price Sources', notCheckable = true, hasArrow = true, menuList = {
+			{ text = 'Prices of Items', notCheckable = true, hasArrow = true, menuList = {
 				{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 				{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 				{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
