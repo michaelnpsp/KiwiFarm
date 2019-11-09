@@ -1,8 +1,16 @@
+-- ============================================================================
 -- KiwiFarm (C) 2019 MiCHaEL
+-- ============================================================================
+
 local addonName = ...
 
---
+-- main frame
+local addon = CreateFrame('Frame', "KiwiFarm", UIParent)
+
+-- misc values
 local CLASSIC = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
+
+-- default values
 local RESET_MAX = CLASSIC and 5 or 10
 local MARGIN = 4
 local COLOR_TRANSPARENT = { 0,0,0,0 }
@@ -30,6 +38,7 @@ local SOUNDS = {
 	["PvP Through Queue"] = 8459,
 }
 
+-- database defaults
 local DEFAULTS = {
 	mobKills             = 0,
 	moneyCash            = 0,
@@ -46,23 +55,24 @@ local DEFAULTS = {
 	notifySoundByQuality = {},
 	notifySoundByPrice   = nil,
 	notifySoundPrice     = nil,
-	textHide             = { quality=true },
+	disabled             = { quality=true },
 	backColor 	         = { 0, 0, 0, .4 },
 	minimapIcon          = { hide = false },
 	framePos             = { anchor = 'TOPLEFT', x = 0, y = 0 },
+	visible              = true,
 }
 
---
+-- local reference for fast access
 local time = time
 local date = date
 local type = type
 local next = next
 local unpack = unpack
+local tinsert = tinsert
 local strfind = strfind
 local floor = math.floor
 local strlower = strlower
 local format = string.format
-local tinsert = tinsert
 local band = bit.band
 local strmatch = strmatch
 local IsInInstance = IsInInstance
@@ -70,46 +80,31 @@ local GetZoneText = GetZoneText
 local GetItemInfo = GetItemInfo
 local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
 
-local config
-local resets
-local textHide
+-- database references for fast access
+local config    -- database realm table
+local resets    -- instance resets table
+local disabled  -- disabled texts table
 
-local lastZoneKey
+-- miscellaneous variables
 local combatActive
 local combatCurKills = 0
 local combatPreKills = 0
 local timeLootedItems = 0 -- track changes in config.lootedItems table
 
--- main frame
-local addon = CreateFrame('Frame', "KiwiFarm", UIParent)
-addon:EnableMouse(true)
-addon:SetMovable(true)
-addon:RegisterForDrag("LeftButton")
-addon:SetScript("OnDragStart", addon.StartMoving)
-addon:SetScript("OnDragStop", function(self)
-	self:StopMovingOrSizing()
-	self:SetUserPlaced(false)
-	self:SavePosition()
-	self:RestorePosition()
-end )
--- background texture
-local backTexture = addon:CreateTexture()
-backTexture:SetAllPoints()
--- text left
-local text0 = addon:CreateFontString()
-text0:SetPoint('TOPLEFT')
-text0:SetJustifyH('LEFT')
--- text right
-local text = addon:CreateFontString()
-text:SetPoint('TOPRIGHT')
-text:SetJustifyH('RIGHT')
--- timer
-local timer = addon:CreateAnimationGroup()
-timer.animation = timer:CreateAnimation()
-timer.animation:SetDuration(1)
-timer:SetLooping("REPEAT")
+-- main frame graphics elements
+local texture -- background texture
+local textl   -- left text
+local textr   -- right text
+local timer   -- update timer
 
--- utils
+-- ============================================================================
+-- utils & misc functions
+-- ============================================================================
+
+local function strfirstword(str)
+	return strmatch(str, "^(.-) ") or str
+end
+
 local ZoneTitle
 do
 	local strcut
@@ -135,10 +130,6 @@ do
 		end
 	end
 	ZoneTitle = setmetatable( {}, { __index = function(t,k) local v=strcut(k,18); t[k]=v; return v; end } )
-end
-
-local function strfirstword(str)
-	return strmatch(str, "^(.-) ") or str
 end
 
 local function NotifySound(sound, channel)
@@ -194,22 +185,6 @@ local function String2Copper(str)
 	end
 end
 
-local function RegisterMoney(money)
-	local key = date("%Y/%m/%d")
-	config.moneyDaily[key] = (config.moneyDaily[key] or 0) + money
-end
-
-local function RegisterItem(itemLink, itemName, quantity, money)
-	local itemData = config.lootedItems[itemLink]
-	if not itemData then
-		itemData = { 0, 0 }
-		config.lootedItems[itemLink] = itemData
-		timeLootedItems = time()
-	end
-	itemData[1] = itemData[1] + quantity
-	itemData[2] = itemData[2] + money
-end
-
 local IsEnchantingMat
 if CLASSIC then
 	local ENCHANTING = {
@@ -222,7 +197,7 @@ if CLASSIC then
 		return ENCHANTING[itemID]
 	end
 else
-	function IsEnchantingMat(itemID, class, subClass)
+	function IsEnchantingMat(_, class, subClass)
 		return class==7 and subClass==12
 	end
 end
@@ -277,13 +252,13 @@ do
 		text_mask   =	           "|cFF7FFF72%s|r\n"      -- zone
 		text_mask   = text_mask .. "%s%02d:%02d:%02d|r\n"  -- session duration
 		-- instance reset & lock info
-		if not textHide.reset then
+		if not disabled.reset then
 			text_header = text_header .. "Resets:\nLocked:\n"
 			text_mask   = text_mask   .. "(%s%d|r) %s%02d:%02d|r\n"  -- last reset
 			text_mask   = text_mask   .. "(%s%d|r) %s%02d:%02d|r\n"  -- lock time
 		end
 		-- count data
-		if not textHide.count then
+		if not disabled.count then
 			-- mobs killed
 			text_header = text_header .. "Mobs killed:\n"
 			text_mask   = text_mask   .. "(%d) %d\n"
@@ -296,7 +271,7 @@ do
 		text_mask   = text_mask   .. "%s\n"  -- money cash
 		text_mask   = text_mask   .. "%s\n"  -- money items
 		-- gold by item quality
-		if not textHide.quality then
+		if not disabled.quality then
 			for i=0,5 do -- gold by qualities (poor to legendary)
 				text_header = text_header .. format(" %s\n",FmtQuality(i));
 				text_mask   = text_mask   .. "(%d) %s\n"
@@ -306,7 +281,7 @@ do
 		text_header = text_header .. "Gold/hour:\nGold total:"
 		text_mask   = text_mask .. "%s\n" -- money per hour
 		text_mask   = text_mask .. "%s" -- money total
-		text0:SetText(text_header)
+		textl:SetText(text_header)
 	end
 	-- refresh text
 	function RefreshText()
@@ -328,7 +303,7 @@ do
 		data[#data+1] = m0
 		data[#data+1] = s0
 		-- reset data
-		if not textHide.reset then
+		if not disabled.reset then
 			local timeLast  = resets[#resets]
 			local timeLock  = #resets>0 and resets[1]+3600 or nil
 			local remain    = RESET_MAX-#resets
@@ -348,7 +323,7 @@ do
 			data[#data+1] = sUnlock%60
 		end
 		-- count data
-		if not textHide.count then
+		if not disabled.count then
 			-- mob kills
 			data[#data+1] = combatCurKills or combatPreKills
 			data[#data+1] = config.mobKills
@@ -358,7 +333,7 @@ do
 		-- gold info
 		data[#data+1] = FmtMoney(config.moneyCash)
 		data[#data+1] = FmtMoney(config.moneyItems)
-		if not textHide.quality then
+		if not disabled.quality then
 			for i=0,5 do
 				data[#data+1] = config.countByQuality[i] or 0
 				data[#data+1] = FmtMoney(config.moneyByQuality[i] or 0)
@@ -368,7 +343,7 @@ do
 		data[#data+1] = FmtMoney(sSession>0 and floor(total*3600/sSession) or 0)
 		data[#data+1] = FmtMoney(total)
 		-- set text
-		text:SetFormattedText( text_mask, unpack(data) )
+		textr:SetFormattedText( text_mask, unpack(data) )
 		-- update timer status
 		local stopped = #resets==0 and not config.lockspent and not config.sessionStart
 		if stopped ~= not timer:IsPlaying() then
@@ -439,13 +414,51 @@ local function SessionReset()
 	timeLootedItems = time()
 end
 
+-- restore main frame position
+local function RestorePosition()
+	addon:ClearAllPoints()
+	addon:SetPoint( config.framePos.anchor, UIParent, 'CENTER', config.framePos.x, config.framePos.y )
+end
+
+-- save main frame position
+local function SavePosition()
+	local p, cx, cy = config.framePos, UIParent:GetCenter() -- we are assuming addon frame scale=1 in calculations
+	local x = (p.anchor:find("LEFT")   and self:GetLeft())   or (p.anchor:find("RIGHT") and self:GetRight()) or self:GetLeft()+self:GetWidth()/2
+	local y = (p.anchor:find("BOTTOM") and self:GetBottom()) or (p.anchor:find("TOP")   and self:GetTop())   or self:GetTop() -self:GetHeight()/2
+	p.x, p.y = x-cx, y-cy
+end
+
+-- layout main frame
+local function LayoutFrame()
+	-- background
+	texture:SetColorTexture( unpack(config.backColor or COLOR_TRANSPARENT) )
+	-- text headers
+	textl:ClearAllPoints()
+	textl:SetPoint('TOPLEFT', MARGIN, -MARGIN)
+	textl:SetJustifyH('LEFT')
+	textl:SetJustifyV('TOP')
+	textl:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
+	PrepareText()
+	-- text main data
+	textr:ClearAllPoints()
+	textr:SetPoint('TOPRIGHT', -MARGIN, -MARGIN)
+	textr:SetPoint('TOPLEFT', MARGIN, -MARGIN)
+	textr:SetJustifyH('RIGHT')
+	textr:SetJustifyV('TOP')
+	textr:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
+	RefreshText()
+	-- main frame size
+	addon:SetHeight( textl:GetHeight() + MARGIN*2 )
+	addon:SetWidth( config.frameWidth or (textl:GetWidth() * 2.3) + MARGIN*2 )
+end
+
+-- ============================================================================
+-- events
+-- ============================================================================
+
 -- main frame becomes visible
 addon:SetScript("OnShow", function(self)
 	RefreshText()
-end)
-
--- main frame becomes invisible
-addon:SetScript("OnHide", function(self)
 end)
 
 -- shift+mouse click to reset instances
@@ -479,19 +492,30 @@ function addon:CHAT_MSG_LOOT(event,msg)
 			local price, rarity, itemName = GetItemPrice(itemLink)
 			if price then
 				local money = price*quantity
-				RegisterMoney(money)
-				RegisterItem(itemLink, itemName, quantity, money)
+				-- register item looted
+				local lootedItem = config.lootedItems[itemLink]
+				if not lootedItem then
+					lootedItem = { 0, 0 }
+					config.lootedItems[itemLink] = lootedItem
+					timeLootedItems = time()
+				end
+				lootedItem[1] = lootedItem[1] + quantity
+				lootedItem[2] = lootedItem[2] + money
+				-- register items money earned
 				config.moneyItems = config.moneyItems + money
 				config.moneyByQuality[rarity] = (config.moneyByQuality[rarity] or 0) + money
+				-- register daily money earned
+				local dailyKey = date("%Y/%m/%d")
+				config.moneyDaily[dailyKey] = (config.moneyDaily[dailyKey] or 0) + money
+				-- register counts
 				config.countItems = config.countItems + quantity
 				config.countByQuality[rarity] = (config.countByQuality[rarity] or 0) + quantity
+				-- notify chat
 				if config.notifyChatByQuality[rarity] or (config.notifyChatPrice and money>=config.notifyChatPrice) then
 					print( format("|cFF7FFF72KiwiFarm:|r %sx%d %s", itemLink, quantity, FmtMoneyShort(money) ) )
 				end
-				NotifySound(
-					config.notifySoundByQuality[rarity] or
-					(config.notifySoundPrice and money>=config.notifySoundPrice and config.notifySoundByPrice)
-				)
+				-- notif sound
+				NotifySound( config.notifySoundByQuality[rarity] or	(config.notifySoundPrice and money>=config.notifySoundPrice and config.notifySoundByPrice) )
 			end
 		end
 	end
@@ -505,9 +529,12 @@ do
 		if config.sessionStart then
 			wipe(digits)
 			msg:gsub("%d+",func)
-			local copper = digits[#digits] + (digits[#digits-1] or 0)*100 + (digits[#digits-2] or 0)*10000
-			config.moneyCash = config.moneyCash + copper
-			RegisterMoney(copper)
+			local money = digits[#digits] + (digits[#digits-1] or 0)*100 + (digits[#digits-2] or 0)*10000
+			-- register cash money
+			config.moneyCash = config.moneyCash + money
+			-- register daily money
+			local dailyKey = date("%Y/%m/%d")
+			config.moneyDaily[dailyKey] = (config.moneyDaily[dailyKey] or 0) + money
 		end
 	end
 end
@@ -524,46 +551,49 @@ function addon:PLAYER_REGEN_ENABLED()
 	combatActive = nil
 end
 
-
-name, instanceType, difficultyID, difficultyName, maxPlayers, dynamicDifficulty, isDynamic, instanceID, instanceGroupSize, LfgDungeonID = GetInstanceInfo()
-
 -- zones management
-function addon:ZONE_CHANGED_NEW_AREA(event)
-	local zone = GetZoneText()
-	if zone and zone~='' then
-		local inst = IsInInstance()
-		local zoneKey = format("%s:%s",zone,tostring(inst))
-		if zoneKey ~= lastZoneKey or (not event) then -- no event => called from config
-			if inst and #resets>=RESET_MAX then -- locked but inside instance, means locked expired before estimated unlock time
-				table.remove(resets,1)
-			end
-			if config.zones then
-				if config.zones[zone] then
-					if inst and lastZoneKey then
-						SessionStart()
-					else
-						RefreshText()
+do
+	local lastZoneKey
+	function addon:ZONE_CHANGED_NEW_AREA(event)
+		local zone = GetZoneText()
+		if zone and zone~='' then
+			local inst = IsInInstance()
+			local zoneKey = format("%s:%s",zone,tostring(inst))
+			if zoneKey ~= lastZoneKey or (not event) then -- no event => called from config
+				if inst and #resets>=RESET_MAX then -- locked but inside instance, means locked expired before estimated unlock time
+					table.remove(resets,1)
+				end
+				if config.zones then
+					if config.zones[zone] then
+						if inst and lastZoneKey then
+							SessionStart()
+						else
+							RefreshText()
+						end
+						self:Show()
+					elseif not config.reloadUI then
+						SessionStop()
+						self:Hide()
 					end
-					self:Show()
-				else
-					SessionStop()
-					self:Hide()
+				elseif self:IsVisible() then
+					RefreshText()
 				end
-			elseif self:IsVisible() then
-				RefreshText()
-			end
-			if config.sessionStart then -- to track when the instance save becomes dirty (mobs killed)
-				if inst then
-					self:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
-				else
-					self:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+				if config.sessionStart then -- to track when the instance save is used (mobs killed)
+					if inst then
+						self:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+					else
+						self:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+					end
 				end
+				if config.reloadUI then -- clear reloadUI flag if set
+					config.reloadUI = nil
+				end
+				lastZoneKey = zoneKey
 			end
-			lastZoneKey = zoneKey
 		end
 	end
+	addon.PLAYER_ENTERING_WORLD = addon.ZONE_CHANGED_NEW_AREA
 end
-addon.PLAYER_ENTERING_WORLD = addon.ZONE_CHANGED_NEW_AREA
 
 -- stop session and register automatic reset on player logout
 do
@@ -578,6 +608,7 @@ do
 			end
 			SessionStop()
 		end
+		config.reloadUI = not isLogout or nil
 	end
 end
 
@@ -595,46 +626,47 @@ function addon:COMBAT_LOG_EVENT_UNFILTERED()
 	end
 end
 
--- restore main frame position
-function addon:RestorePosition()
-	addon:ClearAllPoints()
-	addon:SetPoint( config.framePos.anchor, UIParent, 'CENTER', config.framePos.x, config.framePos.y )
-end
+-- ============================================================================
+-- addon entry point
+-- ============================================================================
 
--- save main frame position
-function addon:SavePosition()
-	local p, cx, cy = config.framePos, UIParent:GetCenter() -- we are assuming addon frame scale=1 in calculations
-	local x = (p.anchor:find("LEFT")   and self:GetLeft())   or (p.anchor:find("RIGHT") and self:GetRight()) or self:GetLeft()+self:GetWidth()/2
-	local y = (p.anchor:find("BOTTOM") and self:GetBottom()) or (p.anchor:find("TOP")   and self:GetTop())   or self:GetTop() -self:GetHeight()/2
-	p.x, p.y = x-cx, y-cy
-end
-
--- layout main frame
-local function LayoutFrame()
-	-- background
-	backTexture:SetColorTexture( unpack(config.backColor or COLOR_TRANSPARENT) )
-	-- text headers
-	text0:ClearAllPoints()
-	text0:SetPoint('TOPLEFT', MARGIN, -MARGIN)
-	text0:SetJustifyH('LEFT')
-	text0:SetJustifyV('TOP')
-	text0:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
-	PrepareText()
-	-- text main data
-	text:ClearAllPoints()
-	text:SetPoint('TOPRIGHT', -MARGIN, -MARGIN)
-	text:SetPoint('TOPLEFT', MARGIN, -MARGIN)
-	text:SetJustifyH('RIGHT')
-	text:SetJustifyV('TOP')
-	text:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
-	RefreshText()
-	-- main frame size
-	addon:SetHeight( text0:GetHeight() + MARGIN*2 )
-	addon:SetWidth( config.frameWidth or (text0:GetWidth() * 2.3) + MARGIN*2 )
-end
-
--- initialize
-local function Initialize()
+addon:RegisterEvent("ADDON_LOADED")
+addon:RegisterEvent("PLAYER_LOGIN")
+addon:SetScript("OnEvent", function(frame, event, name)
+	if event == "ADDON_LOADED" and name == addonName then
+		addon.__loaded = true
+	end
+	if not (addon.__loaded and IsLoggedIn()) then return end
+	-- unregister init events
+	addon:UnregisterAllEvents()
+	-- main frame init
+	addon:EnableMouse(true)
+	addon:SetMovable(true)
+	addon:RegisterForDrag("LeftButton")
+	addon:SetScript("OnDragStart", addon.StartMoving)
+	addon:SetScript("OnDragStop", function(self)
+		self:StopMovingOrSizing()
+		self:SetUserPlaced(false)
+		SavePosition()
+		RestorePosition()
+	end )
+	-- background texture
+	texture = addon:CreateTexture()
+	texture:SetAllPoints()
+	-- text left
+	textl = addon:CreateFontString()
+	textl:SetPoint('TOPLEFT')
+	textl:SetJustifyH('LEFT')
+	-- text right
+	textr = addon:CreateFontString()
+	textr:SetPoint('TOPRIGHT')
+	textr:SetJustifyH('RIGHT')
+	-- timer
+	timer = addon:CreateAnimationGroup()
+	timer.animation = timer:CreateAnimation()
+	timer.animation:SetDuration(1)
+	timer:SetLooping("REPEAT")
+	timer:SetScript("OnLoop", RefreshText)
 	-- database setup
 	local serverKey = GetRealmName()
 	local root = KiwiFarmDB
@@ -650,8 +682,8 @@ local function Initialize()
 			config[k] = v
 		end
 	end
- 	resets = config.resets
-	textHide = config.textHide
+	resets   = config.resets
+	disabled = config.disabled
 	-- minimap icon
 	LibStub("LibDBIcon-1.0"):Register(addonName, LibStub("LibDataBroker-1.1"):NewDataObject(addonName, {
 		type  = "launcher",
@@ -661,16 +693,15 @@ local function Initialize()
 			if button == 'RightButton' then
 				addon:ShowMenu()
 			else
-				addon:SetShown( not addon:IsVisible() )
+				addon:SetShown( not addon:IsShown() )
+				config.visible = addon:IsShown()
 			end
 		end,
 		OnTooltipShow = function(tooltip)
-			tooltip:AddDoubleLine("Kiwi Farm", GetAddOnMetadata(addonName, "Version") )
+			tooltip:AddDoubleLine("KiwiFarm", GetAddOnMetadata(addonName, "Version") )
 			tooltip:AddLine("|cFFff4040Left Click|r toggle window visibility\n|cFFff4040Right Click|r open config menu", 0.2, 1, 0.2)
 		end,
 	}) , config.minimapIcon)
-	-- timer
-	timer:SetScript("OnLoop", RefreshText)
 	-- events
 	addon:SetScript('OnEvent', function(self,event,...) self[event](self,event,...) end)
 	addon:RegisterEvent("CHAT_MSG_SYSTEM")
@@ -678,7 +709,7 @@ local function Initialize()
 	addon:RegisterEvent("PLAYER_ENTERING_WORLD")
 	addon:RegisterEvent("PLAYER_LOGOUT")
 	-- frame position
-	addon:RestorePosition()
+	RestorePosition()
 	-- frame size & appearance
 	LayoutFrame()
 	-- session
@@ -687,22 +718,14 @@ local function Initialize()
 	else
 		RefreshText()
 	end
-end
-
--- init events
-addon:RegisterEvent("ADDON_LOADED")
-addon:RegisterEvent("PLAYER_LOGIN")
-addon:SetScript("OnEvent", function(frame, event, name)
-	if event == "ADDON_LOADED" and name == addonName then
-		addon.__loaded = true
-	end
-	if addon.__loaded and IsLoggedIn() then
-		addon:UnregisterAllEvents()
-		Initialize()
-	end
+	-- mainframe initial visibility
+	addon:SetShown( config.visible and (not config.zones or config.reloadUI) )
 end)
 
--- config cmdline
+-- ============================================================================
+-- cmdline config
+-- ============================================================================
+
 SLASH_KIWIFARM1,SLASH_KIWIFARM2 = "/kfarm", "/kiwifarm"
 SlashCmdList.KIWIFARM = function(args)
 	local arg1,arg2,arg3 = strsplit(" ",args,3)
@@ -733,27 +756,31 @@ SlashCmdList.KIWIFARM = function(args)
 	end
 end
 
+-- ============================================================================
 -- config popup menu
+-- ============================================================================
+
 do
-	-- menu main frame
+	-- popup menu main frame
 	local menuFrame = CreateFrame("Frame", "KiwiFarmPopupMenu", UIParent, "UIDropDownMenuTemplate")
 	-- our popup menu management
 	local showMenu, refreshMenu, splitMenu, wipeMenu
 	do
+		-- initialize menu with special management of enhanced menuList tables, with keys not supported by the base UIDropDownMenu code.
 		local function initialize( frame, level, menuList )
 			local init = menuList.init
-			if init then
+			if init then -- custom initialization function for the menuList
 				init(menuList)
 			end
 			for index=1,#menuList do
 				local item = menuList[index]
-				if type(item.text)=='function' then
+				if type(item.text)=='function' then -- save function text in another field for later use
 					item.textf = item.text
 				end
-				if item.textf then
+				if item.textf then -- text support for functions instead of only strings
 					item.text = item.textf(item)
 				end
-				if item.hasColorSwatch then
+				if item.hasColorSwatch then -- simplified color management, only simple get&set functions required to retrieve&save the color
 					if not item.swatchFunc then
 						local get, set = item.get, item.set
 						item.swatchFunc  = function() local r,g,b,a = get(item); r,g,b = ColorPickerFrame:GetColorRGB(); set(item, r,g,b,a) end
@@ -763,7 +790,7 @@ do
 					item.r, item.g, item.b, item.opacity = item.get(item)
 					item.opacity = 1 - item.opacity
 				end
-				if item.useParentValue then
+				if item.useParentValue then -- use the value of the parent popup, needed to make splitMenu() transparent
 					item.value = UIDROPDOWNMENU_MENU_VALUE
 				end
 				item.index = index
@@ -796,7 +823,7 @@ do
 				menu[#menu].text = strfirstword(first[fdisp]) .. ' - ' .. strfirstword(last[fdisp])
 			end
 		end
-		-- refresh last open level menu
+		-- refresh last open level menu (does not work for root popup menu)
 		function refreshMenu()
 			local frame = _G["DropDownList"..(UIDROPDOWNMENU_MENU_LEVEL or '')]
 			if frame and frame:IsShown() then
@@ -806,7 +833,7 @@ do
 				end
 			end
 		end
-		-- show my popup menu
+		-- show my enhanced popup menu
 		function showMenu(menuList, menuFrame, anchor, x, y, autoHideDelay )
 			menuFrame.displayMode = "MENU"
 			UIDropDownMenu_Initialize(menuFrame, initialize, "MENU", nil, menuList);
@@ -823,7 +850,7 @@ do
 		return true -- means do not call the function anymore
 	end
 	local function SetBackground()
-		backTexture:SetColorTexture( unpack(config.backColor or COLOR_TRANSPARENT) )
+		texture:SetColorTexture( unpack(config.backColor or COLOR_TRANSPARENT) )
 	end
 	local function SetWidth(info)
 		config.frameWidth = info.value~=0 and math.max( (config.frameWidth or addon:GetWidth()) + info.value, 50) or nil
@@ -838,8 +865,8 @@ do
 	end
 	local function SetAnchor(info)
 		config.framePos.anchor = info.value
-		addon:SavePosition()
-		addon:RestorePosition()
+		SavePosition()
+		RestorePosition()
 	end
 	local function MoneyFmtChecked(info)
 		return info.value == (config.moneyFmt or '')
@@ -849,10 +876,10 @@ do
 		RefreshText()
 	end
 	local function DisplayChecked(info)
-		return not textHide[info.value]
+		return not disabled[info.value]
 	end
 	local function SetDisplay(info)
-		textHide[info.value] = (not textHide[info.value]) or nil
+		disabled[info.value] = (not disabled[info.value]) or nil
 		PrepareText(); LayoutFrame(); RefreshText()
 	end
 	local function MinPriceChecked(info)
@@ -952,7 +979,6 @@ do
 		-- menu: individual items prices
 		menuPriceItems = { init = function(menu)
 			if not menu[1] then
-				wipeMenu(menu)
 				for itemLink,sources in pairs(config.priceByItem) do
 					local name = strmatch(itemLink, '%|h%[(.+)%]%|h')
 					tinsert( menu, { text = itemLink, value = itemLink, arg1 = name, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
@@ -1122,6 +1148,7 @@ do
 				{ text = '999|cffffd70ag|r', 									value = '%d|cffffd70ag|r', 				   checked = MoneyFmtChecked, func = SetMoneyFmt },
 			} },
 			{ text = 'Notify: Chat', notCheckable = true, hasArrow = true, menuList = {
+				{ text = FmtQuality(0), value = 0, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
 				{ text = FmtQuality(1), value = 1, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
 				{ text = FmtQuality(2), value = 2, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
 				{ text = FmtQuality(3), value = 3, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
@@ -1130,6 +1157,7 @@ do
 				{ text = GetMinPriceText, isNotRadio = true, checked = MinPriceChecked, arg1 = "notifyChatPrice", func = SetMinPrice },
 			} },
 			{ text = 'Notify: Sounds', notCheckable = true, hasArrow = true, menuList = {
+				{ text = FmtQuality(0), value = 0, notCheckable= true, hasArrow = true, menuList = menuSounds },
 				{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuSounds },
 				{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuSounds },
 				{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuSounds },
@@ -1170,7 +1198,10 @@ do
 	end
 end
 
--- Dialogs
+-- ============================================================================
+-- dialogs
+-- ============================================================================
+
 do
 	local dummy = function() end
 	StaticPopupDialogs["KIWIFARM_DIALOG"] = { timeout = 0, whileDead = 1, hideOnEscape = 1, button1 = ACCEPT, button2 = CANCEL }
