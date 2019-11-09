@@ -21,45 +21,46 @@ local FONTS = {
 	Skurri = 'Fonts\\SKURRI.TTF'
 }
 local SOUNDS = {
+	["Alarm Clock Warning2"] = 12867,
 	["Auction Window Open"] = "Sound/Interface/AuctionWindowOpen.ogg",
 	["Auction Window Close"] = "Sound/Interface/AuctionWindowClose.ogg",
 	["Coin" ] =  "Sound/interface/lootcoinlarge.ogg",
 	["Money"] =  "sound/interface/imoneydialogopen.ogg",
 	["Level Up"] = "Sound/Interface/LevelUp.ogg",
 	["Gun Fire"] = "sound/item/weapons/gunfire01.ogg",
+	["Pick Up Gems"] = 1221,
 	["Player Invite"] = "Sound/Interface/iPlayerInviteA.ogg",
+	["Put Down Gems"] = 1204,
+	["PvP Enter Queue"] = 8458,
+	["PvP Through Queue"] = 8459,
 	["Raid Warning"] = "Sound/Interface/RaidWarning.ogg",
 	["Ready Check"] = "Sound/Interface/ReadyCheck.ogg",
 	["Quest List Open"] = 875,
-	["Alarm Clock Warning2"] = 12867,
-	["Put Down Gems"] = 1204,
-	["Pick Up Gems"] = 1221,
-	["PvP Enter Queue"] = 8458,
-	["PvP Through Queue"] = 8459,
 }
 
 -- database defaults
 local DEFAULTS = {
-	mobKills             = 0,
-	moneyCash            = 0,
-	moneyItems           = 0,
-	countItems           = 0,
-	moneyDaily           = {},
-	moneyByQuality       = {},
-	countByQuality       = {},
-	lootedItems          = {},
-	priceByItem          = {},
-	priceByQuality       = { [0]={vendor = true}, [1]={vendor = true}, [2]={vendor = true}, [3]={vendor = true}, [4]={vendor = true}, [5]={vendor = true}, [6]={vendor = true}, [7]={vendor = true}, [8]={vendor = true}, [9]={vendor = true} },
-	notifyChatByQuality  = { [0]=nil, [1]=true, [2]=true, [3]=true, [4]=true, [5]=true, [6]=true, [7]=true, [8]=true, [9]=true },
-	notifyChatPrice      = nil,
-	notifySoundByQuality = {},
-	notifySoundByPrice   = nil,
-	notifySoundPrice     = nil,
-	disabled             = { quality=true },
-	backColor 	         = { 0, 0, 0, .4 },
-	minimapIcon          = { hide = false },
-	framePos             = { anchor = 'TOPLEFT', x = 0, y = 0 },
-	visible              = true,
+	mobKills              = 0,
+	moneyCash             = 0,
+	moneyItems            = 0,
+	countItems            = 0,
+	moneyDaily            = {},
+	moneyByQuality        = {},
+	countByQuality        = {},
+	lootedItems           = {},
+	priceByItem           = {},
+	priceByQuality        = { [0]={vendor = true}, [1]={vendor = true}, [2]={vendor = true}, [3]={vendor = true}, [4]={vendor = true}, [5]={vendor = true}, [6]={vendor = true}, [7]={vendor = true}, [8]={vendor = true}, [9]={vendor = true} },
+	notifyChatByQuality   = { [0]=nil, [1]=true, [2]=true, [3]=true, [4]=true, [5]=true, [6]=true, [7]=true, [8]=true, [9]=true },
+	notifyCombatByQuality = {},
+	notifyChatPrice       = nil,
+	notifySoundByQuality  = {},
+	notifySoundByPrice    = nil,
+	notifySoundPrice      = nil,
+	disabled              = { quality=true },
+	backColor 	          = { 0, 0, 0, .4 },
+	minimapIcon           = { hide = false },
+	framePos              = { anchor = 'TOPLEFT', x = 0, y = 0 },
+	visible               = true,
 }
 
 -- local reference for fast access
@@ -78,6 +79,8 @@ local strmatch = strmatch
 local IsInInstance = IsInInstance
 local GetZoneText = GetZoneText
 local GetItemInfo = GetItemInfo
+local COPPER_PER_GOLD = COPPER_PER_GOLD
+local COPPER_PER_SILVER = COPPER_PER_SILVER
 local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
 
 -- database references for fast access
@@ -91,7 +94,7 @@ local combatCurKills = 0
 local combatPreKills = 0
 local timeLootedItems = 0 -- track changes in config.lootedItems table
 
--- main frame graphics elements
+-- main frame elements
 local texture -- background texture
 local textl   -- left text
 local textr   -- right text
@@ -130,6 +133,12 @@ do
 		end
 	end
 	ZoneTitle = setmetatable( {}, { __index = function(t,k) local v=strcut(k,18); t[k]=v; return v; end } )
+end
+
+local function NotifyCombat(text)
+	if CombatText_AddMessage or LoadAddOn("Blizzard_CombatText") then
+		CombatText_AddMessage(text, CombatText_StandardScroll, 1, 1, 1,  nil, false)
+	end
 end
 
 local function NotifySound(sound, channel)
@@ -356,7 +365,7 @@ do
 	end
 end
 
--- add reset
+-- register instance reset
 local function AddReset()
 	local curtime = time()
 	if curtime-(resets[#resets] or 0)>3 then -- ignore reset of additional instances
@@ -432,14 +441,14 @@ end
 local function LayoutFrame()
 	-- background
 	texture:SetColorTexture( unpack(config.backColor or COLOR_TRANSPARENT) )
-	-- text headers
+	-- text left
 	textl:ClearAllPoints()
 	textl:SetPoint('TOPLEFT', MARGIN, -MARGIN)
 	textl:SetJustifyH('LEFT')
 	textl:SetJustifyV('TOP')
 	textl:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
 	PrepareText()
-	-- text main data
+	-- text right
 	textr:ClearAllPoints()
 	textr:SetPoint('TOPRIGHT', -MARGIN, -MARGIN)
 	textr:SetPoint('TOPLEFT', MARGIN, -MARGIN)
@@ -447,7 +456,7 @@ local function LayoutFrame()
 	textr:SetJustifyV('TOP')
 	textr:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
 	RefreshText()
-	-- main frame size
+	-- frame size
 	addon:SetHeight( textl:GetHeight() + MARGIN*2 )
 	addon:SetWidth( config.frameWidth or (textl:GetWidth() * 2.3) + MARGIN*2 )
 end
@@ -513,6 +522,10 @@ function addon:CHAT_MSG_LOOT(event,msg)
 				-- notify chat
 				if config.notifyChatByQuality[rarity] or (config.notifyChatPrice and money>=config.notifyChatPrice) then
 					print( format("|cFF7FFF72KiwiFarm:|r %sx%d %s", itemLink, quantity, FmtMoneyShort(money) ) )
+				end
+				-- notifiy scrolling combat text
+				if config.notifyCombatByQuality[rarity] or (config.notifyCombatPrice and money>=config.notifyCombatPrice) then
+					NotifyCombat( format("%sx%d %s", itemLink, quantity, FmtMoneyShort(money) ) )
 				end
 				-- notif sound
 				NotifySound( config.notifySoundByQuality[rarity] or	(config.notifySoundPrice and money>=config.notifySoundPrice and config.notifySoundByPrice) )
@@ -723,7 +736,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 end)
 
 -- ============================================================================
--- cmdline config
+-- config cmdline
 -- ============================================================================
 
 SLASH_KIWIFARM1,SLASH_KIWIFARM2 = "/kfarm", "/kiwifarm"
@@ -895,10 +908,10 @@ do
 		end)
 	end
 	local function NotifyQualityChecked(info)
-		return config.notifyChatByQuality[info.value]
+		return config[info.arg1][info.value]
 	end
 	local function SetNotifyQuality(info)
-		config.notifyChatByQuality[info.value] = (not config.notifyChatByQuality[info.value]) or nil
+		config[info.arg1][info.value] = (not config[info.arg1][info.value]) or nil
 	end
 	-- menu: quality sources
 	local menuQualitySources
@@ -1148,22 +1161,31 @@ do
 				{ text = '999|cffffd70ag|r', 									value = '%d|cffffd70ag|r', 				   checked = MoneyFmtChecked, func = SetMoneyFmt },
 			} },
 			{ text = 'Notify: Chat', notCheckable = true, hasArrow = true, menuList = {
-				{ text = FmtQuality(0), value = 0, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(1), value = 1, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(2), value = 2, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(3), value = 3, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(4), value = 4, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(5), value = 5, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(0), value = 0, isNotRadio = true, keepShownOnClick = 1, arg1='notifyChatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(1), value = 1, isNotRadio = true, keepShownOnClick = 1, arg1='notifyChatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(2), value = 2, isNotRadio = true, keepShownOnClick = 1, arg1='notifyChatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(3), value = 3, isNotRadio = true, keepShownOnClick = 1, arg1='notifyChatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(4), value = 4, isNotRadio = true, keepShownOnClick = 1, arg1='notifyChatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(5), value = 5, isNotRadio = true, keepShownOnClick = 1, arg1='notifyChatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
 				{ text = GetMinPriceText, isNotRadio = true, checked = MinPriceChecked, arg1 = "notifyChatPrice", func = SetMinPrice },
 			} },
+			{ text = 'Notify: CombatText', notCheckable = true, hasArrow = true, menuList = {
+				{ text = FmtQuality(0), value = 0, isNotRadio = true, keepShownOnClick = 1, arg1='notifyCombatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(1), value = 1, isNotRadio = true, keepShownOnClick = 1, arg1='notifyCombatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(2), value = 2, isNotRadio = true, keepShownOnClick = 1, arg1='notifyCombatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(3), value = 3, isNotRadio = true, keepShownOnClick = 1, arg1='notifyCombatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(4), value = 4, isNotRadio = true, keepShownOnClick = 1, arg1='notifyCombatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = FmtQuality(5), value = 5, isNotRadio = true, keepShownOnClick = 1, arg1='notifyCombatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
+				{ text = GetMinPriceText, isNotRadio = true, checked = MinPriceChecked, arg1 = "notifyCombatPrice", func = SetMinPrice },
+			} },
 			{ text = 'Notify: Sounds', notCheckable = true, hasArrow = true, menuList = {
-				{ text = FmtQuality(0), value = 0, notCheckable= true, hasArrow = true, menuList = menuSounds },
-				{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuSounds },
-				{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuSounds },
-				{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuSounds },
-				{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuSounds },
-				{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuSounds },
-				{ text = GetMinPriceText,	value = -1, notCheckable = true, arg1 = "notifySoundPrice", func = SetMinPrice, hasArrow = true, menuList = menuSounds },
+				{ text = FmtQuality(0), value = 0, notCheckable = true, hasArrow = true, menuList = menuSounds },
+				{ text = FmtQuality(1), value = 1, notCheckable = true, hasArrow = true, menuList = menuSounds },
+				{ text = FmtQuality(2), value = 2, notCheckable = true, hasArrow = true, menuList = menuSounds },
+				{ text = FmtQuality(3), value = 3, notCheckable = true, hasArrow = true, menuList = menuSounds },
+				{ text = FmtQuality(4), value = 4, notCheckable = true, hasArrow = true, menuList = menuSounds },
+				{ text = FmtQuality(5), value = 5, notCheckable = true, hasArrow = true, menuList = menuSounds },
+				{ text = GetMinPriceText, value = -1, notCheckable = true, arg1 = "notifySoundPrice", func = SetMinPrice, hasArrow = true, menuList = menuSounds },
 			} },
 		} },
 		{ text = 'Frame', notCheckable= true, hasArrow = true, menuList = {
