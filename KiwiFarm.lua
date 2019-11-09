@@ -2,7 +2,8 @@
 local addonName = ...
 
 --
-local RESET_MAX = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC) and 5 or 10
+local CLASSIC = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
+local RESET_MAX = CLASSIC and 5 or 10
 local MARGIN = 4
 local COLOR_TRANSPARENT = { 0,0,0,0 }
 local FONTS = {
@@ -21,6 +22,12 @@ local SOUNDS = {
 	["Player Invite"] = "Sound/Interface/iPlayerInviteA.ogg",
 	["Raid Warning"] = "Sound/Interface/RaidWarning.ogg",
 	["Ready Check"] = "Sound/Interface/ReadyCheck.ogg",
+	["Quest List Open"] = 875,
+	["Alarm Clock Warning2"] = 12867,
+	["Put Down Gems"] = 1204,
+	["Pick Up Gems"] = 1221,
+	["PvP Enter Queue"] = 8458,
+	["PvP Through Queue"] = 8459,
 }
 
 local DEFAULTS = {
@@ -53,6 +60,7 @@ local next = next
 local unpack = unpack
 local strfind = strfind
 local floor = math.floor
+local strlower = strlower
 local format = string.format
 local tinsert = tinsert
 local band = bit.band
@@ -66,11 +74,10 @@ local config
 local resets
 local textHide
 
+local lastZoneKey
 local combatActive
-local combatTime
 local combatCurKills = 0
 local combatPreKills = 0
-
 local timeLootedItems = 0 -- track changes in config.lootedItems table
 
 -- main frame
@@ -134,6 +141,16 @@ local function strfirstword(str)
 	return strmatch(str, "^(.-) ") or str
 end
 
+local function NotifySound(sound, channel)
+	if sound then
+		if type(sound)~='number' then
+			PlaySoundFile(sound, channel or "master")
+		elseif sound~=0 then
+			PlaySound(sound, channel or "master")
+		end
+	end
+end
+
 local function FmtQuality(i)
 	return format( "|c%s%s|r", select(4,GetItemQualityColor(i)), _G['ITEM_QUALITY'..i..'_DESC'] )
 end
@@ -193,6 +210,23 @@ local function RegisterItem(itemLink, itemName, quantity, money)
 	itemData[2] = itemData[2] + money
 end
 
+local IsEnchantingMat
+if CLASSIC then
+	local ENCHANTING = {
+		[10940] = true, [11134] = true, [16203] = true,	[11135] = true, [11174] = true,	[14344] = true,
+		[11082] = true, [11137] = true,	[11083] = true,	[10998] = true,	[20725] = true,	[11138] = true,
+		[11084] = true,	[11139] = true,	[11178] = true,	[10938] = true,	[11176] = true,	[14343] = true,
+		[11177] = true,	[10939] = true,	[10978] = true,	[16204] = true,	[16202] = true,	[11175] = true,
+	}
+	function IsEnchantingMat(itemID)
+		return ENCHANTING[itemID]
+	end
+else
+	function IsEnchantingMat(itemID, class, subClass)
+		return class==7 and subClass==12
+	end
+end
+
 -- calculate item price
 local GetItemPrice
 do
@@ -216,14 +250,15 @@ do
 	function GetItemPrice(itemLink)
 		ItemUpgradeInfo = Atr_GetAuctionPrice and Atr_CalcDisenchantPrice and LibStub('LibItemUpgradeInfo-1.0',true) -- Check if auctionator is installed
 		GetItemPrice = function(itemLink)
-			local itemID = strmatch(itemLink, "item:(%d+):") or itemLink
-			local name, _, rarity, _, _, _, _, _, _, _, vendorPrice, class = GetItemInfo(itemLink)
-			local sources = config.priceByItem[itemLink] or config.priceByQuality[rarity or 0] or {}
-			local price = 0
-			for src, user in pairs(sources) do
-				price = max( price, GetValue(src, itemLink, itemID, name, class, rarity, vendorPrice, user) )
+			local itemID = tonumber(strmatch(itemLink, "item:(%d+):"))
+			local name, _, rarity, _, _, _, _, _, _, _, vendorPrice, class, subClass = GetItemInfo(itemLink)
+			if not (config.ignoreEnchantingMats and IsEnchantingMat(itemID, class, subClass)) then
+				local price, sources = 0, config.priceByItem[itemLink] or config.priceByQuality[rarity or 0] or {}
+				for src, user in pairs(sources) do
+					price = max( price, GetValue(src, itemLink, itemID, name, class, rarity, vendorPrice, user) )
+				end
+				return price, rarity, name
 			end
-			return price, rarity, name
 		end
 		return GetItemPrice(itemLink)
 	end
@@ -442,19 +477,21 @@ function addon:CHAT_MSG_LOOT(event,msg)
 		end
 		if itemLink then
 			local price, rarity, itemName = GetItemPrice(itemLink)
-			local money = price*quantity
-			RegisterMoney(money)
-			RegisterItem(itemLink, itemName, quantity, money)
-			config.moneyItems = config.moneyItems + money
-			config.moneyByQuality[rarity] = (config.moneyByQuality[rarity] or 0) + money
-			config.countItems = config.countItems + quantity
-			config.countByQuality[rarity] = (config.countByQuality[rarity] or 0) + quantity
-			if config.notifyChatByQuality[rarity] or (config.notifyChatPrice and money>=config.notifyChatPrice) then
-				print( format("|cFF7FFF72KiwiFarm:|r looted %sx%d %s", itemLink, quantity, FmtMoneyShort(money) ) )
-			end
-			local soundID = config.notifySoundByQuality[rarity] or (config.notifySoundPrice and money>=config.notifySoundPrice and config.notifySoundByPrice)
-			if soundID then
-				PlaySoundFile(soundID, "master")
+			if price then
+				local money = price*quantity
+				RegisterMoney(money)
+				RegisterItem(itemLink, itemName, quantity, money)
+				config.moneyItems = config.moneyItems + money
+				config.moneyByQuality[rarity] = (config.moneyByQuality[rarity] or 0) + money
+				config.countItems = config.countItems + quantity
+				config.countByQuality[rarity] = (config.countByQuality[rarity] or 0) + quantity
+				if config.notifyChatByQuality[rarity] or (config.notifyChatPrice and money>=config.notifyChatPrice) then
+					print( format("|cFF7FFF72KiwiFarm:|r %sx%d %s", itemLink, quantity, FmtMoneyShort(money) ) )
+				end
+				NotifySound(
+					config.notifySoundByQuality[rarity] or
+					(config.notifySoundPrice and money>=config.notifySoundPrice and config.notifySoundByPrice)
+				)
 			end
 		end
 	end
@@ -480,7 +517,6 @@ function addon:PLAYER_REGEN_DISABLED()
 	combatActive = true
 	combatPreKills = combatCurKills or combatPreKills
 	combatCurKills = nil
-	combatTime  = time()
 end
 
 -- combat end
@@ -488,32 +524,42 @@ function addon:PLAYER_REGEN_ENABLED()
 	combatActive = nil
 end
 
+
+name, instanceType, difficultyID, difficultyName, maxPlayers, dynamicDifficulty, isDynamic, instanceID, instanceGroupSize, LfgDungeonID = GetInstanceInfo()
+
 -- zones management
 function addon:ZONE_CHANGED_NEW_AREA(event)
-	local ins,typ = IsInInstance()
-	if ins and #resets>=RESET_MAX then -- locked but inside instance, means locked expired before estimated unlock time
-		table.remove(resets,1)
-	end
-	if config.zones then
-		if config.zones[GetZoneText()] then
-			if ins then
-				SessionStart()
-			else
+	local zone = GetZoneText()
+	if zone and zone~='' then
+		local inst = IsInInstance()
+		local zoneKey = format("%s:%s",zone,tostring(inst))
+		if zoneKey ~= lastZoneKey or (not event) then -- no event => called from config
+			if inst and #resets>=RESET_MAX then -- locked but inside instance, means locked expired before estimated unlock time
+				table.remove(resets,1)
+			end
+			if config.zones then
+				if config.zones[zone] then
+					if inst and lastZoneKey then
+						SessionStart()
+					else
+						RefreshText()
+					end
+					self:Show()
+				else
+					SessionStop()
+					self:Hide()
+				end
+			elseif self:IsVisible() then
 				RefreshText()
 			end
-			self:Show()
-		else
-			SessionStop()
-			self:Hide()
-		end
-	elseif self:IsVisible() then
-		RefreshText()
-	end
-	if config.sessionStart then -- to track when the instance save becomes dirty (mobs killed)
-		if ins then
-			self:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
-		else
-			self:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+			if config.sessionStart then -- to track when the instance save becomes dirty (mobs killed)
+				if inst then
+					self:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+				else
+					self:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+				end
+			end
+			lastZoneKey = zoneKey
 		end
 	end
 end
@@ -641,7 +687,6 @@ local function Initialize()
 	else
 		RefreshText()
 	end
-	addon:ZONE_CHANGED_NEW_AREA()
 end
 
 -- init events
@@ -718,6 +763,9 @@ do
 					item.r, item.g, item.b, item.opacity = item.get(item)
 					item.opacity = 1 - item.opacity
 				end
+				if item.useParentValue then
+					item.value = UIDROPDOWNMENU_MENU_VALUE
+				end
 				item.index = index
 				UIDropDownMenu_AddButton(item,level)
 			end
@@ -727,33 +775,35 @@ do
 			local init = menu.init;	wipe(menu); menu.init = init
 		end
 		-- split a big menu items table in several submenus
-		function splitMenu(menu, field)
-			field = field or 'text'
-			table.sort(menu, function(a,b) return a[field]<b[field] end )
+		function splitMenu(menu, fsort, fdisp)
+			fsort = fsort or 'text'
+			fdisp = fdisp or fsort
+			table.sort(menu, function(a,b) return a[fsort]<b[fsort] end )
 			local count, items, first, last = #menu
 			if count>28 then
 				for i=1,count do
 					if not items or #items>=28 then
 						if items then
-							menu[#menu].text = strfirstword(first[field]) .. ' - ' .. strfirstword(last[field])
+							menu[#menu].text = strfirstword(first[fdisp]) .. ' - ' .. strfirstword(last[fdisp])
 						end
 						items = {}
-						tinsert(menu, { notCheckable= true, hasArrow = true, menuList = items } )
+						tinsert(menu, { notCheckable= true, hasArrow = true, useParentValue = true, menuList = items } )
 						first = menu[1]
 					end
 					last = table.remove(menu,1)
 					tinsert(items, last)
 				end
-				menu[#menu].text = strfirstword(first[field]) .. ' - ' .. strfirstword(last[field])
+				menu[#menu].text = strfirstword(first[fdisp]) .. ' - ' .. strfirstword(last[fdisp])
 			end
 		end
 		-- refresh last open level menu
 		function refreshMenu()
-			local frame = UIDROPDOWNMENU_OPEN_MENU
-			if frame and frame.menuList and frame:IsShown() then
-				local parent, level, value = frame:GetParent(), UIDROPDOWNMENU_MENU_LEVEL, UIDROPDOWNMENU_MENU_VALUE
-				HideDropDownMenu(level)
-				ToggleDropDownMenu(level, value, nil, nil, nil, nil, frame.menuList, parent)
+			local frame = _G["DropDownList"..(UIDROPDOWNMENU_MENU_LEVEL or '')]
+			if frame and frame:IsShown() then
+				local _, anchorTo = frame:GetPoint(1)
+				if anchorTo and anchorTo.menuList then
+					ToggleDropDownMenu(UIDROPDOWNMENU_MENU_LEVEL, UIDROPDOWNMENU_MENU_VALUE, nil, nil, nil, nil, anchorTo.menuList, anchorTo)
+				end
 			end
 		end
 		-- show my popup menu
@@ -925,6 +975,9 @@ do
 					local name = strmatch(itemLink, '%|h%[(.+)%]%|h')
 					tinsert( menu, { text = getText, value = itemLink, arg1 = name, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
 				end
+				if not menu[1] then
+					menu[1] = { text = "None", notCheckable = true }
+				end
 				splitMenu(menu, 'arg1')
 				menu.time = timeLootedItems
 			end
@@ -994,7 +1047,8 @@ do
 			else
 				config.notifySoundByPrice = sound~=0 and sound or nil
 			end
-			if sound~=0 then PlaySoundFile(sound, "master") end
+			refreshMenu()
+			NotifySound(sound)
 		end
 		local function checked(info)
 			local sound, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
@@ -1005,11 +1059,12 @@ do
 			end
 		end
 		menuSounds = { init = function(menu)
-			tinsert( menu, { text = '[None]', value = 0, func = set, checked = checked } )
-			for name, key in pairs(SOUNDS) do
-				tinsert( menu, { text = name, value = key, func = set, checked = checked } )
+			local media = LibStub("LibSharedMedia-3.0", true)
+			tinsert( menu, { text = '[None]', arg1 = '|', value = 0, func = set, checked = checked } )
+			for name, key in pairs(media and media:HashTable('sound') or SOUNDS) do
+				tinsert( menu, { text = name, value = key, arg1=strlower(name), func = set, checked = checked, keepShownOnClick = 1 } )
 			end
-			table.sort(menu, function(a,b) return a.text<b.text end)
+			splitMenu(menu, 'arg1', 'text')
 			menu.init = nil -- do not call this init function anymore
 		end }
 	end
@@ -1051,13 +1106,14 @@ do
 				{ text = 'Gold by Quality',  value = 'quality', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 			} },
 			{ text = 'Prices of Items', notCheckable = true, hasArrow = true, menuList = {
+				{ text = FmtQuality(0), value = 0, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 				{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 				{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 				{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 				{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 				{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 				{ text = 'Individual Items', notCheckable= true, hasArrow = true, menuList = menuPriceItems },
-
+				{ text = 'Ignore enchanting mats', isNotRadio = true, keepShownOnClick = 1, checked = function() return config.ignoreEnchantingMats; end, func = function() config.ignoreEnchantingMats = not config.ignoreEnchantingMats or nil; end },
 			} },
 			{ text = 'Farming Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
 			{ text = 'Money Format', notCheckable = true, hasArrow = true, menuList = {
@@ -1066,7 +1122,6 @@ do
 				{ text = '999|cffffd70ag|r', 									value = '%d|cffffd70ag|r', 				   checked = MoneyFmtChecked, func = SetMoneyFmt },
 			} },
 			{ text = 'Notify: Chat', notCheckable = true, hasArrow = true, menuList = {
-				{ text = FmtQuality(0), value = 0, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
 				{ text = FmtQuality(1), value = 1, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
 				{ text = FmtQuality(2), value = 2, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
 				{ text = FmtQuality(3), value = 3, isNotRadio = true, keepShownOnClick = 1, checked = NotifyQualityChecked, func = SetNotifyQuality },
