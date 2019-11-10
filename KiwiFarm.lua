@@ -20,22 +20,34 @@ local FONTS = {
 	Morpheus = 'Fonts\\MORPHEUS.TTF',
 	Skurri = 'Fonts\\SKURRI.TTF'
 }
-local SOUNDS = {
-	["Alarm Clock Warning2"] = 12867,
-	["Auction Window Open"] = "Sound/Interface/AuctionWindowOpen.ogg",
-	["Auction Window Close"] = "Sound/Interface/AuctionWindowClose.ogg",
-	["Coin" ] =  "Sound/interface/lootcoinlarge.ogg",
-	["Money"] =  "sound/interface/imoneydialogopen.ogg",
-	["Level Up"] = "Sound/Interface/LevelUp.ogg",
-	["Gun Fire"] = "sound/item/weapons/gunfire01.ogg",
-	["Pick Up Gems"] = 1221,
-	["Player Invite"] = "Sound/Interface/iPlayerInviteA.ogg",
-	["Put Down Gems"] = 1204,
-	["PvP Enter Queue"] = 8458,
-	["PvP Through Queue"] = 8459,
-	["Raid Warning"] = "Sound/Interface/RaidWarning.ogg",
-	["Ready Check"] = "Sound/Interface/ReadyCheck.ogg",
-	["Quest List Open"] = 875,
+local SOUNDS = CLASSIC and {
+	["Auction Window Open"] = "sound/interface/auctionwindowopen.ogg",
+	["Auction Window Close"] = "sound/interface/auctionwindowclose.ogg",
+	["Coin" ] = "sound/interface/lootcoinlarge.ogg",
+	["Money"] = "sound/interface/imoneydialogopen.ogg",
+	["Level Up"] = "sound/interface/levelup.ogg",
+	["Pick Up Gems"] = "sound/interface/pickup/pickupgems.ogg",
+	["Player Invite"] = "sound/interface/iplayerinvitea.ogg",
+	["Put Down Gems"] = "sound/interface/pickup/putdowngems.ogg",
+	["PvP Enter Queue"] = "sound/spells/pvpenterqueue.ogg",
+	["PvP Through Queue"] =	"sound/spells/pvpthroughqueue.ogg",
+	["Raid Warning"] = "sound/interface/raidwarning.ogg",
+	["Ready Check"] = "sound/interface/readycheck.ogg",
+	["Quest List Open"] = "sound/interface/iquestlogopena.ogg",
+} or {
+	["Auction Window Open"] = 567482,
+	["Auction Window Close"] = 567499,
+	["Coin" ] = 567428,
+	["Money"] = 567483,
+	["Level Up"] = 569593,
+	["Pick Up Gems"] = 567568,
+	["Player Invite"] = 567451,
+	["Put Down Gems"] = 567574,
+	["PvP Enter Queue"] = 568587,
+	["PvP Through Queue"] =	568011,
+	["Raid Warning"] =567397,
+	["Ready Check"] = 567478,
+	["Quest List Open"] = 567504,
 }
 
 -- database defaults
@@ -49,18 +61,13 @@ local DEFAULTS = {
 	countByQuality        = {},
 	lootedItems           = {},
 	priceByItem           = {},
-	priceByQuality        = { [0]={vendor = true}, [1]={vendor = true}, [2]={vendor = true}, [3]={vendor = true}, [4]={vendor = true}, [5]={vendor = true}, [6]={vendor = true}, [7]={vendor = true}, [8]={vendor = true}, [9]={vendor = true} },
-	notifyChatByQuality   = { [0]=nil, [1]=true, [2]=true, [3]=true, [4]=true, [5]=true, [6]=true, [7]=true, [8]=true, [9]=true },
-	notifyCombatByQuality = {},
-	notifyChatPrice       = nil,
-	notifySoundByQuality  = {},
-	notifySoundByPrice    = nil,
-	notifySoundPrice      = nil,
+	priceByQuality        = { [0]={vendor=true}, [1]={vendor=true}, [2]={vendor=true}, [3]={vendor=true}, [4]={vendor=true}, [5]={vendor=true} },
+	notify 				  = { [1]={chat=true}, [2]={chat=true}, [3]={chat=true}, [4]={chat=true}, [5]={chat=true}, sound={} },
 	disabled              = { quality=true },
 	backColor 	          = { 0, 0, 0, .4 },
-	minimapIcon           = { hide = false },
 	framePos              = { anchor = 'TOPLEFT', x = 0, y = 0 },
 	visible               = true,
+	minimapIcon           = { hide = false },
 }
 
 -- local reference for fast access
@@ -87,6 +94,7 @@ local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
 local config    -- database realm table
 local resets    -- instance resets table
 local disabled  -- disabled texts table
+local notify    -- notifications table
 
 -- miscellaneous variables
 local combatActive
@@ -135,22 +143,7 @@ do
 	ZoneTitle = setmetatable( {}, { __index = function(t,k) local v=strcut(k,18); t[k]=v; return v; end } )
 end
 
-local function NotifyCombat(text)
-	if CombatText_AddMessage or LoadAddOn("Blizzard_CombatText") then
-		CombatText_AddMessage(text, CombatText_StandardScroll, 1, 1, 1,  nil, false)
-	end
-end
-
-local function NotifySound(sound, channel)
-	if sound then
-		if type(sound)~='number' then
-			PlaySoundFile(sound, channel or "master")
-		elseif sound~=0 then
-			PlaySound(sound, channel or "master")
-		end
-	end
-end
-
+-- text format functions
 local function FmtQuality(i)
 	return format( "|c%s%s|r", select(4,GetItemQualityColor(i)), _G['ITEM_QUALITY'..i..'_DESC'] )
 end
@@ -194,6 +187,48 @@ local function String2Copper(str)
 	end
 end
 
+-- notification funcions
+local Notify, NotifyEnd
+do
+	local notified = {}
+	local channels = {
+		chat = function(itemLink, quantity, money)
+			print( format("|cFF7FFF72KiwiFarm:|r %sx%d %s", itemLink, quantity, FmtMoneyShort(money) ) )
+		end,
+		combat = function(itemLink, quantity, money)
+			local text = format("%sx%d %s", itemLink, quantity, FmtMoneyShort(money) )
+			if CombatText_AddMessage or LoadAddOn("Blizzard_CombatText") then
+				CombatText_AddMessage(text, CombatText_StandardScroll, 1, 1, 1, nil, false)
+			end
+		end,
+		sticky = function(itemLink, quantity, money)
+			local text = format("%sx%d %s", itemLink, quantity, FmtMoneyShort(money) )
+			if CombatText_AddMessage or LoadAddOn("Blizzard_CombatText") then
+				CombatText_AddMessage(text, CombatText_StandardScroll, 1, 1, 1, 'crit', false)
+			end
+		end,
+		sound = function(_, _, _, groupKey)
+			local sound = notify.sound[groupKey]
+			if sound then PlaySoundFile(sound, "master") end
+		end,
+	}
+	function Notify(groupKey, itemLink, quantity, money)
+		for channel,v in pairs(notify[groupKey]) do
+			if not notified[channel] then
+				local func = channels[channel]
+				if func and (v==true or money>=v) then
+					func(itemLink, quantity, money, groupKey)
+					notified[channel] = true
+				end
+			end
+		end
+	end
+	function NotifyEnd()
+		wipe(notified)
+	end
+end
+
+-- items & price functions
 local IsEnchantingMat
 if CLASSIC then
 	local ENCHANTING = {
@@ -432,8 +467,8 @@ end
 -- save main frame position
 local function SavePosition()
 	local p, cx, cy = config.framePos, UIParent:GetCenter() -- we are assuming addon frame scale=1 in calculations
-	local x = (p.anchor:find("LEFT")   and self:GetLeft())   or (p.anchor:find("RIGHT") and self:GetRight()) or self:GetLeft()+self:GetWidth()/2
-	local y = (p.anchor:find("BOTTOM") and self:GetBottom()) or (p.anchor:find("TOP")   and self:GetTop())   or self:GetTop() -self:GetHeight()/2
+	local x = (p.anchor:find("LEFT")   and addon:GetLeft())   or (p.anchor:find("RIGHT") and addon:GetRight()) or addon:GetLeft()+addon:GetWidth()/2
+	local y = (p.anchor:find("BOTTOM") and addon:GetBottom()) or (p.anchor:find("TOP")   and addon:GetTop())   or addon:GetTop() -addon:GetHeight()/2
 	p.x, p.y = x-cx, y-cy
 end
 
@@ -519,16 +554,10 @@ function addon:CHAT_MSG_LOOT(event,msg)
 				-- register counts
 				config.countItems = config.countItems + quantity
 				config.countByQuality[rarity] = (config.countByQuality[rarity] or 0) + quantity
-				-- notify chat
-				if config.notifyChatByQuality[rarity] or (config.notifyChatPrice and money>=config.notifyChatPrice) then
-					print( format("|cFF7FFF72KiwiFarm:|r %sx%d %s", itemLink, quantity, FmtMoneyShort(money) ) )
-				end
-				-- notifiy scrolling combat text
-				if config.notifyCombatByQuality[rarity] or (config.notifyCombatPrice and money>=config.notifyCombatPrice) then
-					NotifyCombat( format("%sx%d %s", itemLink, quantity, FmtMoneyShort(money) ) )
-				end
-				-- notif sound
-				NotifySound( config.notifySoundByQuality[rarity] or	(config.notifySoundPrice and money>=config.notifySoundPrice and config.notifySoundByPrice) )
+				-- notifications
+				if notify[rarity] then Notify(rarity,   itemLink, quantity, money) end
+				if notify.price   then Notify('price',  itemLink, quantity, money) end
+				NotifyEnd()
 			end
 		end
 	end
@@ -696,6 +725,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 		end
 	end
 	resets   = config.resets
+	notify   = config.notify
 	disabled = config.disabled
 	-- minimap icon
 	LibStub("LibDBIcon-1.0"):Register(addonName, LibStub("LibDataBroker-1.1"):NewDataObject(addonName, {
@@ -836,9 +866,9 @@ do
 				menu[#menu].text = strfirstword(first[fdisp]) .. ' - ' .. strfirstword(last[fdisp])
 			end
 		end
-		-- refresh last open level menu (does not work for root popup menu)
-		function refreshMenu()
-			local frame = _G["DropDownList"..(UIDROPDOWNMENU_MENU_LEVEL or '')]
+		-- refresh last open level menu (does not work for root popup menu due to incorrect anchor)
+		function refreshMenu(level)
+			local frame = _G["DropDownList"..(level or UIDROPDOWNMENU_MENU_LEVEL or '')]
 			if frame and frame:IsShown() then
 				local _, anchorTo = frame:GetPoint(1)
 				if anchorTo and anchorTo.menuList then
@@ -1076,37 +1106,6 @@ do
 			tim = tim - 86400
 		end
 	end	}
-	-- menu: sounds
-	local menuSounds
-	do
-		local function set(info)
-			local sound, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
-			if rarity>=0 then
-				config.notifySoundByQuality[rarity] = sound~=0 and sound or nil
-			else
-				config.notifySoundByPrice = sound~=0 and sound or nil
-			end
-			refreshMenu()
-			NotifySound(sound)
-		end
-		local function checked(info)
-			local sound, rarity = info.value, UIDROPDOWNMENU_MENU_VALUE
-			if rarity>=0 then
-				return (config.notifySoundByQuality[rarity] or 0) == sound
-			else
-				return (config.notifySoundByPrice or 0) == sound
-			end
-		end
-		menuSounds = { init = function(menu)
-			local media = LibStub("LibSharedMedia-3.0", true)
-			tinsert( menu, { text = '[None]', arg1 = '|', value = 0, func = set, checked = checked } )
-			for name, key in pairs(media and media:HashTable('sound') or SOUNDS) do
-				tinsert( menu, { text = name, value = key, arg1=strlower(name), func = set, checked = checked, keepShownOnClick = 1 } )
-			end
-			splitMenu(menu, 'arg1', 'text')
-			menu.init = nil -- do not call this init function anymore
-		end }
-	end
 	-- menu: fonts
 	local menuFonts
 	do
@@ -1124,6 +1123,84 @@ do
 			splitMenu(menu)
 			menu.init = nil -- do not call this init function anymore
 		end }
+	end
+	-- menu: sounds
+	local menuSounds
+	do
+		-- groupKey = qualityID | 'price'
+		local function set(info)
+			local sound, groupKey = info.value, UIDROPDOWNMENU_MENU_VALUE
+			notify.sound[groupKey] = sound~=0 and sound or nil
+			PlaySoundFile(sound,"master")
+			refreshMenu()
+		end
+		local function checked(info)
+			local sound, groupKey = info.value, UIDROPDOWNMENU_MENU_VALUE
+			return (notify.sound[groupKey] or 0) == sound
+		end
+		menuSounds = { init = function(menu)
+			local media = LibStub("LibSharedMedia-3.0", true)
+			if media then
+				for name,fileID in pairs(SOUNDS) do
+					media:Register("sound", name, fileID)
+				end
+			end
+			tinsert( menu, { text = '[None]', arg1 = '|', value = 0, func = set, checked = checked } )
+			for name, key in pairs(media and media:HashTable('sound') or SOUNDS) do
+				if name~='None' then
+					tinsert( menu, { text = name, value = key, arg1=strlower(name), func = set, checked = checked, keepShownOnClick = 1 } )
+				end
+			end
+			splitMenu(menu, 'arg1', 'text')
+			menu.init = nil -- do not call this init function anymore
+		end }
+	end
+	-- menu: notify
+	local menuNotifyQuality, menuNotifyPrice
+	do
+		-- info.value = qualityID|'price' ; info.arg1 = 'chat'|'combat'|'sticky'|'sound'
+		local function checked(info)
+			local groupKey, channelKey = info.value, info.arg1
+			return notify[groupKey] and notify[groupKey][channelKey]~=nil
+		end
+		local function set(info,value)
+			local groupKey, channelKey = info.value, info.arg1
+			notify[groupKey] = notify[groupKey] or {}
+			notify[groupKey][channelKey] = value or nil
+			if not next(notify[groupKey]) then notify[groupKey] = nil end
+		end
+		-- menuNotifyQuality
+		local function setQuality(info)
+			set(info, not checked(info))
+		end
+		menuNotifyQuality = {
+			{ text = 'Chat Text',           useParentValue = true, arg1 = 'chat',   isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
+			{ text = 'Combat Text: Scroll', useParentValue = true, arg1 = 'combat', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
+			{ text = 'Combat Text: Crit',   useParentValue = true, arg1 = 'sticky', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
+			{ text = 'Sound',               useParentValue = true, arg1 = 'sound',  isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality, hasArrow = true, menuList = menuSounds },
+		}
+		-- menuNotifyPrice
+		local function getPriceText(info)
+			local price = notify.price and notify.price[info.arg1]
+			if price then
+				return format( "%s (price +%s)", info.arg2, FmtMoneyShort(price) )
+			else
+				return format( "%s (click to set price)", info.arg2 )
+			end
+		end
+		local function setPrice(info)
+			local price = notify.price and notify.price[info.arg1]
+			addon:EditDialog('|cFF7FFF72KiwiFarm|r\n Set the minimum price of the item to display a notification, leave the field blank to remove the minimum price.', FmtMoneyPlain(price), function(v)
+				set(info, String2Copper(v) )
+				refreshMenu()
+			end)
+		end
+		menuNotifyPrice = {
+			{ text = getPriceText, useParentValue = true, arg1 = 'chat',   arg2 = 'Chat Text',   		 isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
+			{ text = getPriceText, useParentValue = true, arg1 = 'combat', arg2 = 'Combat Text: Scroll', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
+			{ text = getPriceText, useParentValue = true, arg1 = 'sticky', arg2 = 'Combat Text: Crit',   isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
+			{ text = getPriceText, useParentValue = true, arg1 = 'sound',  arg2 = 'Sound',       		 isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice, hasArrow = true, menuList = menuSounds },
+		}
 	end
 	-- menu: main
 	local menuMain = {
@@ -1160,32 +1237,14 @@ do
 				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 					value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
 				{ text = '999|cffffd70ag|r', 									value = '%d|cffffd70ag|r', 				   checked = MoneyFmtChecked, func = SetMoneyFmt },
 			} },
-			{ text = 'Notify: Chat', notCheckable = true, hasArrow = true, menuList = {
-				{ text = FmtQuality(0), value = 0, isNotRadio = true, keepShownOnClick = 1, arg1='notifyChatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(1), value = 1, isNotRadio = true, keepShownOnClick = 1, arg1='notifyChatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(2), value = 2, isNotRadio = true, keepShownOnClick = 1, arg1='notifyChatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(3), value = 3, isNotRadio = true, keepShownOnClick = 1, arg1='notifyChatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(4), value = 4, isNotRadio = true, keepShownOnClick = 1, arg1='notifyChatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(5), value = 5, isNotRadio = true, keepShownOnClick = 1, arg1='notifyChatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = GetMinPriceText, isNotRadio = true, checked = MinPriceChecked, arg1 = "notifyChatPrice", func = SetMinPrice },
-			} },
-			{ text = 'Notify: CombatText', notCheckable = true, hasArrow = true, menuList = {
-				{ text = FmtQuality(0), value = 0, isNotRadio = true, keepShownOnClick = 1, arg1='notifyCombatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(1), value = 1, isNotRadio = true, keepShownOnClick = 1, arg1='notifyCombatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(2), value = 2, isNotRadio = true, keepShownOnClick = 1, arg1='notifyCombatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(3), value = 3, isNotRadio = true, keepShownOnClick = 1, arg1='notifyCombatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(4), value = 4, isNotRadio = true, keepShownOnClick = 1, arg1='notifyCombatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = FmtQuality(5), value = 5, isNotRadio = true, keepShownOnClick = 1, arg1='notifyCombatByQuality', checked = NotifyQualityChecked, func = SetNotifyQuality },
-				{ text = GetMinPriceText, isNotRadio = true, checked = MinPriceChecked, arg1 = "notifyCombatPrice", func = SetMinPrice },
-			} },
-			{ text = 'Notify: Sounds', notCheckable = true, hasArrow = true, menuList = {
-				{ text = FmtQuality(0), value = 0, notCheckable = true, hasArrow = true, menuList = menuSounds },
-				{ text = FmtQuality(1), value = 1, notCheckable = true, hasArrow = true, menuList = menuSounds },
-				{ text = FmtQuality(2), value = 2, notCheckable = true, hasArrow = true, menuList = menuSounds },
-				{ text = FmtQuality(3), value = 3, notCheckable = true, hasArrow = true, menuList = menuSounds },
-				{ text = FmtQuality(4), value = 4, notCheckable = true, hasArrow = true, menuList = menuSounds },
-				{ text = FmtQuality(5), value = 5, notCheckable = true, hasArrow = true, menuList = menuSounds },
-				{ text = GetMinPriceText, value = -1, notCheckable = true, arg1 = "notifySoundPrice", func = SetMinPrice, hasArrow = true, menuList = menuSounds },
+			{ text = 'Notifications', notCheckable = true, hasArrow = true, menuList = {
+				{ text = FmtQuality(0),   value = 0,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
+				{ text = FmtQuality(1),   value = 1,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
+				{ text = FmtQuality(2),   value = 2,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
+				{ text = FmtQuality(3),   value = 3,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
+				{ text = FmtQuality(4),   value = 4,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
+				{ text = FmtQuality(5),   value = 5,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
+				{ text = 'Minimum Price', value = 'price', notCheckable = true, hasArrow = true, menuList = menuNotifyPrice   },
 			} },
 		} },
 		{ text = 'Frame', notCheckable= true, hasArrow = true, menuList = {
@@ -1216,7 +1275,7 @@ do
 		{ text = 'Hide Window', notCheckable = true, func = function() addon:Hide() end },
 	}
 	function addon:ShowMenu()
-		showMenu(menuMain, menuFrame, "cursor", 0 , 0, 5)
+		showMenu(menuMain, menuFrame, "cursor", 0 , 0, 15)
 	end
 end
 
