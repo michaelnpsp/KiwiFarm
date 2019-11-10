@@ -70,13 +70,16 @@ local DEFAULTS = {
 	minimapIcon           = { hide = false },
 }
 
--- local reference for fast access
+-- local references
 local time = time
 local date = date
 local type = type
 local next = next
+local print = print
+local pairs = pairs
 local unpack = unpack
 local tinsert = tinsert
+local tonumber = tonumber
 local strfind = strfind
 local floor = math.floor
 local strlower = strlower
@@ -90,11 +93,11 @@ local COPPER_PER_GOLD = COPPER_PER_GOLD
 local COPPER_PER_SILVER = COPPER_PER_SILVER
 local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
 
--- database references for fast access
-local config    -- database realm table
-local resets    -- instance resets table
-local disabled  -- disabled texts table
-local notify    -- notifications table
+-- database references
+local config   -- database realm table
+local resets   -- instance resets table
+local disabled -- disabled texts table
+local notify   -- notifications table
 
 -- miscellaneous variables
 local combatActive
@@ -111,10 +114,6 @@ local timer   -- update timer
 -- ============================================================================
 -- utils & misc functions
 -- ============================================================================
-
-local function strfirstword(str)
-	return strmatch(str, "^(.-) ") or str
-end
 
 local ZoneTitle
 do
@@ -144,6 +143,10 @@ do
 end
 
 -- text format functions
+local function strfirstword(str)
+	return strmatch(str, "^(.-) ") or str
+end
+
 local function FmtQuality(i)
 	return format( "|c%s%s|r", select(4,GetItemQualityColor(i)), _G['ITEM_QUALITY'..i..'_DESC'] )
 end
@@ -187,6 +190,41 @@ local function String2Copper(str)
 	end
 end
 
+-- dialogs
+do
+	local dummy = function() end
+	StaticPopupDialogs["KIWIFARM_DIALOG"] = { timeout = 0, whileDead = 1, hideOnEscape = 1, button1 = ACCEPT, button2 = CANCEL }
+
+	function addon:ShowDialog(message, textDefault, funcAccept, funcCancel, textAccept, textCancel)
+		local t = StaticPopupDialogs["KIWIFARM_DIALOG"]
+		t.OnShow = function (self) if textDefault then self.editBox:SetText(textDefault) end; self:SetFrameStrata("TOOLTIP") end
+		t.OnHide = function(self) self:SetFrameStrata("DIALOG")	end
+		t.hasEditBox = textDefault and true or nil
+		t.text = message
+		t.button1 = funcAccept and (textAccept or ACCEPT) or nil
+		t.button2 = funcCancel and (textCancel or CANCEL) or nil
+		t.OnCancel = funcCancel
+		t.OnAccept = funcAccept and function (self)	funcAccept( textDefault and self.editBox:GetText() ) end or nil
+		StaticPopup_Show ("KIWIFARM_DIALOG")
+	end
+
+	function addon:MessageDialog(message, funcAccept)
+		addon:ShowDialog(message, nil, funcAccept or dummy)
+	end
+
+	function addon:ConfirmDialog(message, funcAccept, funcCancel, textAccept, textCancel)
+		self:ShowDialog(message, nil, funcAccept, funcCancel or dummy, textAccept, textCancel )
+	end
+
+	function addon:EditDialog(message, text, funcAccept, funcCancel)
+		self:ShowDialog(message, text or "", funcAccept, funcCancel or dummy)
+	end
+end
+
+-- ============================================================================
+-- addon specific functions
+-- ============================================================================
+
 -- notification funcions
 local Notify, NotifyEnd
 do
@@ -216,7 +254,7 @@ do
 		for channel,v in pairs(notify[groupKey]) do
 			if not notified[channel] then
 				local func = channels[channel]
-				if func and (v==true or money>=v) then
+				if func and money>=v then
 					func(itemLink, quantity, money, groupKey)
 					notified[channel] = true
 				end
@@ -545,7 +583,7 @@ function addon:CHAT_MSG_LOOT(event,msg)
 				end
 				lootedItem[1] = lootedItem[1] + quantity
 				lootedItem[2] = lootedItem[2] + money
-				-- register items money earned
+				-- register item money earned
 				config.moneyItems = config.moneyItems + money
 				config.moneyByQuality[rarity] = (config.moneyByQuality[rarity] or 0) + money
 				-- register daily money earned
@@ -806,14 +844,17 @@ end
 do
 	-- popup menu main frame
 	local menuFrame = CreateFrame("Frame", "KiwiFarmPopupMenu", UIParent, "UIDropDownMenuTemplate")
-	-- our popup menu management
-	local showMenu, refreshMenu, splitMenu, wipeMenu
+	-- generic & enhanced popup menu management code, reusable for other menus
+	local showMenu, refreshMenu, splitMenu, wipeMenu, getMenuLevel, getMenuValue
 	do
-		-- initialize menu with special management of enhanced menuList tables, with keys not supported by the base UIDropDownMenu code.
+		-- menu initialization: special management of enhanced menuList tables, using fields not supported by the base UIDropDownMenu code.
 		local function initialize( frame, level, menuList )
+			if level then
+				frame.menuValues[level] = UIDROPDOWNMENU_MENU_VALUE
+			end
 			local init = menuList.init
 			if init then -- custom initialization function for the menuList
-				init(menuList)
+				init(menuList, level, frame)
 			end
 			for index=1,#menuList do
 				local item = menuList[index]
@@ -821,12 +862,12 @@ do
 					item.textf = item.text
 				end
 				if item.textf then -- text support for functions instead of only strings
-					item.text = item.textf(item)
+					item.text = item.textf(item, level, frame)
 				end
-				if item.hasColorSwatch then -- simplified color management, only simple get&set functions required to retrieve&save the color
+				if item.hasColorSwatch then -- simplified color management, only definition of get&set functions required to retrieve&save the color
 					if not item.swatchFunc then
 						local get, set = item.get, item.set
-						item.swatchFunc  = function() local r,g,b,a = get(item); r,g,b = ColorPickerFrame:GetColorRGB(); set(item, r,g,b,a) end
+						item.swatchFunc  = function() local r,g,b,a = get(item); r,g,b = ColorPickerFrame:GetColorRGB(); set(item,r,g,b,a) end
 						item.opacityFunc = function() local r,g,b   = get(item); set(item, r,g,b,1-OpacitySliderFrame:GetValue()) end
 						item.cancelFunc  = function(c) set(item, c.r, c.g, c.b, 1-c.opacity) end
 					end
@@ -840,7 +881,15 @@ do
 				UIDropDownMenu_AddButton(item,level)
 			end
 		end
-		-- clear menu table, maintaining special control fields
+		-- get the MENU_LEVEL of the specified menu element ( element = DropDownList or button or nil)
+		function getMenuLevel(element)
+			return element and ((element.dropdown and element:GetID()) or element:GetParent():GetID()) or UIDROPDOWNMENU_MENU_LEVEL
+		end
+		-- get the MENU_VALUE of the specified menu element ( element = level|DropDownList|button|nil )
+		function getMenuValue(element)
+			return element and (UIDROPDOWNMENU_OPEN_MENU.menuValues[type(element)=='table' and getMenuLevel(element) or element]) or UIDROPDOWNMENU_MENU_VALUE
+		end
+		-- clear menu table, but saving special control fields
 		function wipeMenu(menu)
 			local init = menu.init;	wipe(menu); menu.init = init
 		end
@@ -864,26 +913,31 @@ do
 					tinsert(items, last)
 				end
 				menu[#menu].text = strfirstword(first[fdisp]) .. ' - ' .. strfirstword(last[fdisp])
+				return true
 			end
 		end
-		-- refresh last open level menu (does not work for root popup menu due to incorrect anchor)
-		function refreshMenu(level)
-			local frame = _G["DropDownList"..(level or UIDROPDOWNMENU_MENU_LEVEL or '')]
+		-- refresh a submenu ( element = level | button | dropdownlist )
+		function refreshMenu(element, hideChilds)
+			local level = type(element)=='number' and element or getMenuLevel(element)
+			if hideChilds then CloseDropDownMenus(level+1) end
+			local frame = _G["DropDownList"..level]
 			if frame and frame:IsShown() then
 				local _, anchorTo = frame:GetPoint(1)
 				if anchorTo and anchorTo.menuList then
-					ToggleDropDownMenu(UIDROPDOWNMENU_MENU_LEVEL, UIDROPDOWNMENU_MENU_VALUE, nil, nil, nil, nil, anchorTo.menuList, anchorTo)
+					ToggleDropDownMenu(level, getMenuValue(level), nil, nil, nil, nil, anchorTo.menuList, anchorTo)
+					return true
 				end
 			end
 		end
 		-- show my enhanced popup menu
 		function showMenu(menuList, menuFrame, anchor, x, y, autoHideDelay )
 			menuFrame.displayMode = "MENU"
+			menuFrame.menuValues = menuFrame.menuValues  or {}
 			UIDropDownMenu_Initialize(menuFrame, initialize, "MENU", nil, menuList);
 			ToggleDropDownMenu(1, nil, menuFrame, anchor, x, y, menuList, nil, autoHideDelay);
 		end
 	end
-	-- misc functions
+	-- here starts the definition of the KiwiFrame menu, misc functions
 	local function InitPriceSources(menu)
 		for i=#menu,1,-1 do
 			if (menu[i].arg1 =='Atr' and not Atr_GetAuctionPrice) or (menu[i].arg1 =='TSM' and not TSMAPI_FOUR) then
@@ -943,14 +997,14 @@ do
 	local function SetNotifyQuality(info)
 		config[info.arg1][info.value] = (not config[info.arg1][info.value]) or nil
 	end
-	-- menu: quality sources
+	-- submenu: quality sources
 	local menuQualitySources
 	do
 		local function checked(info)
-			return config.priceByQuality[UIDROPDOWNMENU_MENU_VALUE][info.value]
+			return config.priceByQuality[getMenuValue(info)][info.value]
 		end
 		local function set(info)
-			local sources = config.priceByQuality[UIDROPDOWNMENU_MENU_VALUE]
+			local sources = config.priceByQuality[getMenuValue(info)]
 			sources[info.value] = (not sources[info.value]) or nil
 		end
 		menuQualitySources = {
@@ -963,7 +1017,7 @@ do
 			init = InitPriceSources
 		}
 	end
-	-- menus: item sources, price sources
+	-- submenus: item sources, price sources
 	local menuPriceItems, menuItemSources
 	do
 		local function setItemPriceSource(itemLink, source, value)
@@ -991,10 +1045,10 @@ do
 			return sources and sources[source]
 		end
 		local function checked(info)
-			return getItemPriceSource(UIDROPDOWNMENU_MENU_VALUE, info.value)
+			return getItemPriceSource(getMenuValue(info), info.value)
 		end
 		local function set(info)
-			local itemLink, empty = UIDROPDOWNMENU_MENU_VALUE
+			local itemLink, empty = getMenuValue(info)
 			if info.value=='user' then
 				local price    = FmtMoneyPlain( getItemPriceSource(itemLink,'user') ) or ''
 				addon:EditDialog('|cFF7FFF72KiwiFarm|r\n Set a custom price for:\n' .. itemLink, price, function(v)
@@ -1004,11 +1058,11 @@ do
 				setItemPriceSource( itemLink, info.value , not getItemPriceSource(itemLink, info.value) )
 			end
 		end
-		local function getText(info)
-			local price = getItemPriceSource(UIDROPDOWNMENU_MENU_VALUE,'user')
+		local function getText(info, level)
+			local price = getItemPriceSource(getMenuValue(level),'user')
 			return format( 'Price: %s', price and FmtMoneyShort(price) or 'Not Defined')
 		end
-		-- menu: item price sources
+		-- submenu: item price sources
 		menuItemSources = {
 			{ text = getText,	  				  value = 'user',         				isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
 			{ text = 'Vendor Price',              value = 'vendor',                     isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
@@ -1019,7 +1073,7 @@ do
 			{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
 			init = InitPriceSources,
 		}
-		-- menu: individual items prices
+		-- submenu: individual items prices
 		menuPriceItems = { init = function(menu)
 			if not menu[1] then
 				for itemLink,sources in pairs(config.priceByItem) do
@@ -1030,7 +1084,7 @@ do
 			end
 		end	}
 	end
-	-- menu: looted items
+	-- submenu: looted items
 	local menuLootedItems
 	do
 		local function getText(info)
@@ -1052,7 +1106,7 @@ do
 			end
 		end }
 	end
-	-- menu: zones
+	-- submenu: zones
 	local menuZones
 	do
 		local function ZoneAdd()
@@ -1077,7 +1131,7 @@ do
 			end
 		end	}
 	end
-	-- menu: resets
+	-- submenu: resets
 	local menuResets = { init = function(menu)
 		local item = { text = 'None', notCheckable = true }
 		for i=1,5 do
@@ -1088,14 +1142,14 @@ do
 			menu[i], item = item, nil
 		end
 	end	}
-	-- menu: gold earned by item quality
+	-- submenu: gold earned by item quality
 	local menuGoldQuality = { init = function(menu)
 		for i=1,5 do
 			menu[i] = menu[i] or { notCheckable = true }
 			menu[i].text = format( "%s: %s (%d)", FmtQuality(i-1), FmtMoney(config.moneyByQuality[i-1] or 0), config.countByQuality[i-1] or 0)
 		end
 	end }
-	-- menu: gold earned by day
+	-- submenu: gold earned by day
 	local menuGoldDaily = {	init = function(menu)
 		local tim, pre, key, money = time()
 		for i=1,7 do
@@ -1106,7 +1160,7 @@ do
 			tim = tim - 86400
 		end
 	end	}
-	-- menu: fonts
+	-- submenu: fonts
 	local menuFonts
 	do
 		local function set(info)
@@ -1126,30 +1180,30 @@ do
 			menu.init = nil -- do not call this init function anymore
 		end }
 	end
-	-- menu: sounds
+	-- submenu: sounds
 	local menuSounds
 	do
 		-- groupKey = qualityID | 'price'
 		local function set(info)
-			local sound, groupKey = info.value, UIDROPDOWNMENU_MENU_VALUE
-			notify.sound[groupKey] = sound~=0 and sound or nil
+			local sound, groupKey = info.value, getMenuValue(info)
+			notify.sound[groupKey] = sound
 			PlaySoundFile(sound,"master")
 			refreshMenu()
 		end
 		local function checked(info)
-			local sound, groupKey = info.value, UIDROPDOWNMENU_MENU_VALUE
-			return (notify.sound[groupKey] or 0) == sound
+			local sound, groupKey = info.value, getMenuValue(info)
+			return notify.sound[groupKey] == sound
 		end
 		menuSounds = { init = function(menu)
+			local blacklist = { ['None']=true, ['BugSack: Fatality']=true }
 			local media = LibStub("LibSharedMedia-3.0", true)
 			if media then
 				for name,fileID in pairs(SOUNDS) do
 					media:Register("sound", name, fileID)
 				end
 			end
-			tinsert( menu, { text = '[None]', arg1 = '|', value = 0, func = set, checked = checked } )
 			for name, key in pairs(media and media:HashTable('sound') or SOUNDS) do
-				if name~='None' then
+				if not blacklist[name] then
 					tinsert( menu, { text = name, value = key, arg1=strlower(name), func = set, checked = checked, keepShownOnClick = 1 } )
 				end
 			end
@@ -1157,10 +1211,16 @@ do
 			menu.init = nil -- do not call this init function anymore
 		end }
 	end
-	-- menu: notify
+	-- submenu: notify
 	local menuNotifyQuality, menuNotifyPrice
 	do
-		-- info.value = qualityID|'price' ; info.arg1 = 'chat'|'combat'|'sticky'|'sound'
+		-- info.value = qualityID | 'price' ; info.arg1 = 'chat'|'combat'|'sticky'|'sound'
+		local function init(menu, level)
+			local groupKey = getMenuValue(level)
+			local value = notify[groupKey] and notify[groupKey].sound
+			menu[4].hasArrow = value and true or nil
+			menu[4].menuList = value and menuSounds or nil
+		end
 		local function checked(info)
 			local groupKey, channelKey = info.value, info.arg1
 			return notify[groupKey] and notify[groupKey][channelKey]~=nil
@@ -1170,16 +1230,21 @@ do
 			notify[groupKey] = notify[groupKey] or {}
 			notify[groupKey][channelKey] = value or nil
 			if not next(notify[groupKey]) then notify[groupKey] = nil end
+			if channelKey=='sound' then
+				notify.sound[groupKey] = nil
+				refreshMenu(getMenuLevel(info), true)
+			end
 		end
 		-- menuNotifyQuality
 		local function setQuality(info)
-			set(info, not checked(info))
+			set(info, not checked(info) and 0)
 		end
 		menuNotifyQuality = {
 			{ text = 'Chat Text',           useParentValue = true, arg1 = 'chat',   isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
 			{ text = 'Combat Text: Scroll', useParentValue = true, arg1 = 'combat', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
 			{ text = 'Combat Text: Crit',   useParentValue = true, arg1 = 'sticky', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
-			{ text = 'Sound',               useParentValue = true, arg1 = 'sound',  isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality, hasArrow = true, menuList = menuSounds },
+			{ text = 'Sound',               useParentValue = true, arg1 = 'sound',  isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
+			init = init,
 		}
 		-- menuNotifyPrice
 		local function getPriceText(info)
@@ -1192,16 +1257,17 @@ do
 		end
 		local function setPrice(info)
 			local price = notify.price and notify.price[info.arg1]
-			addon:EditDialog('|cFF7FFF72KiwiFarm|r\n Set the minimum price of the item to display a notification. You can leave the field blank to remove the minimum price.', FmtMoneyPlain(price), function(v)
+			addon:EditDialog('|cFF7FFF72KiwiFarm|r\n Set the minimum price to display a notification. You can leave the field blank to remove the minimum price.', FmtMoneyPlain(price), function(v)
 				set(info, String2Copper(v) )
-				refreshMenu()
+				refreshMenu(info)
 			end)
 		end
 		menuNotifyPrice = {
 			{ text = getPriceText, useParentValue = true, arg1 = 'chat',   arg2 = 'Chat Text',   		 isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
 			{ text = getPriceText, useParentValue = true, arg1 = 'combat', arg2 = 'Combat Text: Scroll', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
 			{ text = getPriceText, useParentValue = true, arg1 = 'sticky', arg2 = 'Combat Text: Crit',   isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
-			{ text = getPriceText, useParentValue = true, arg1 = 'sound',  arg2 = 'Sound',       		 isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice, hasArrow = true, menuList = menuSounds },
+			{ text = getPriceText, useParentValue = true, arg1 = 'sound',  arg2 = 'Sound',       		 isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
+			init = init,
 		}
 	end
 	-- menu: main
@@ -1217,28 +1283,26 @@ do
 		{ text = 'Gold by Day',        notCheckable = true, hasArrow = true, menuList = menuGoldDaily },
 		{ text = 'Resets',             notCheckable = true, hasArrow = true, menuList = menuResets },
 		{ text = 'Settings',           notCheckable = true, isTitle = true },
-		--{ text = 'Farming', notCheckable= true, hasArrow = true, menuList = {
-			{ text = 'Prices of Items', notCheckable = true, hasArrow = true, menuList = {
-				{ text = FmtQuality(0), value = 0, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
-				{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
-				{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
-				{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
-				{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
-				{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
-				{ text = 'Individual Items', notCheckable= true, hasArrow = true, menuList = menuPriceItems },
-				{ text = 'Ignore enchanting mats', isNotRadio = true, keepShownOnClick = 1, checked = function() return config.ignoreEnchantingMats; end, func = function() config.ignoreEnchantingMats = not config.ignoreEnchantingMats or nil; end },
-			} },
-			{ text = 'Farming Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
-			{ text = 'Notifications', notCheckable = true, hasArrow = true, menuList = {
-				{ text = FmtQuality(0),   value = 0,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
-				{ text = FmtQuality(1),   value = 1,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
-				{ text = FmtQuality(2),   value = 2,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
-				{ text = FmtQuality(3),   value = 3,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
-				{ text = FmtQuality(4),   value = 4,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
-				{ text = FmtQuality(5),   value = 5,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
-				{ text = 'Minimum Price', value = 'price', notCheckable = true, hasArrow = true, menuList = menuNotifyPrice   },
-			} },
-		---} },
+		{ text = 'Prices of Items', notCheckable = true, hasArrow = true, menuList = {
+			{ text = FmtQuality(0), value = 0, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
+			{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
+			{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
+			{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
+			{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
+			{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
+			{ text = 'Individual Items', notCheckable= true, hasArrow = true, menuList = menuPriceItems },
+			{ text = 'Ignore enchanting mats', isNotRadio = true, keepShownOnClick = 1, checked = function() return config.ignoreEnchantingMats; end, func = function() config.ignoreEnchantingMats = not config.ignoreEnchantingMats or nil; end },
+		} },
+		{ text = 'Farming Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
+		{ text = 'Notifications', notCheckable = true, hasArrow = true, menuList = {
+			{ text = FmtQuality(0),   value = 0,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
+			{ text = FmtQuality(1),   value = 1,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
+			{ text = FmtQuality(2),   value = 2,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
+			{ text = FmtQuality(3),   value = 3,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
+			{ text = FmtQuality(4),   value = 4,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
+			{ text = FmtQuality(5),   value = 5,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
+			{ text = 'Minimum Price', value = 'price', notCheckable = true, hasArrow = true, menuList = menuNotifyPrice   },
+		} },
 		{ text = 'Appearance', notCheckable= true, hasArrow = true, menuList = {
 			{ text = 'Display Info', notCheckable= true, hasArrow = true, menuList = {
 				{ text = 'Lock&Resets',      value = 'reset',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
@@ -1250,7 +1314,6 @@ do
 				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 					value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
 				{ text = '999|cffffd70ag|r', 									value = '%d|cffffd70ag|r', 				   checked = MoneyFmtChecked, func = SetMoneyFmt },
 			} },
-
 			{ text = 'Frame Anchor', notCheckable= true, hasArrow = true, menuList = {
 				{ text = 'Top Left',     value = 'TOPLEFT',     checked = AnchorChecked, func = SetAnchor },
 				{ text = 'Top Right',    value = 'TOPRIGHT',    checked = AnchorChecked, func = SetAnchor },
@@ -1278,40 +1341,6 @@ do
 		} },
 	}
 	function addon:ShowMenu()
-		showMenu(menuMain, menuFrame, "cursor", 0 , 0, 15)
-	end
-end
-
--- ============================================================================
--- dialogs
--- ============================================================================
-
-do
-	local dummy = function() end
-	StaticPopupDialogs["KIWIFARM_DIALOG"] = { timeout = 0, whileDead = 1, hideOnEscape = 1, button1 = ACCEPT, button2 = CANCEL }
-
-	function addon:ShowDialog(message, textDefault, funcAccept, funcCancel, textAccept, textCancel)
-		local t = StaticPopupDialogs["KIWIFARM_DIALOG"]
-		t.OnShow = function (self) if textDefault then self.editBox:SetText(textDefault) end; self:SetFrameStrata("TOOLTIP") end
-		t.OnHide = function(self) self:SetFrameStrata("DIALOG")	end
-		t.hasEditBox = textDefault and true or nil
-		t.text = message
-		t.button1 = funcAccept and (textAccept or ACCEPT) or nil
-		t.button2 = funcCancel and (textCancel or CANCEL) or nil
-		t.OnCancel = funcCancel
-		t.OnAccept = funcAccept and function (self)	funcAccept( textDefault and self.editBox:GetText() ) end or nil
-		StaticPopup_Show ("KIWIFARM_DIALOG")
-	end
-
-	function addon:MessageDialog(message, funcAccept)
-		addon:ShowDialog(message, nil, funcAccept or dummy)
-	end
-
-	function addon:ConfirmDialog(message, funcAccept, funcCancel, textAccept, textCancel)
-		self:ShowDialog(message, nil, funcAccept, funcCancel or dummy, textAccept, textCancel )
-	end
-
-	function addon:EditDialog(message, text, funcAccept, funcCancel)
-		self:ShowDialog(message, text or "", funcAccept, funcCancel or dummy)
+		showMenu(menuMain, menuFrame, "cursor", 0 , 0)
 	end
 end
