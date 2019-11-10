@@ -932,7 +932,7 @@ do
 		return config[info.arg1] and "Price above: "..FmtMoneyShort(config[info.arg1]) or "Minimum Price"
 	end
 	local function SetMinPrice(info)
-		addon:EditDialog('|cFF7FFF72KiwiFarm|r\n Set the minimum price to display looted items in chat:', FmtMoneyPlain(config[info.arg1]), function(v)
+		addon:EditDialog('|cFF7FFF72KiwiFarm|r\nSet the minimum price to display looted items in chat. You can leave the field blank to remove the minimum price.', FmtMoneyPlain(config[info.arg1]), function(v)
 			v = String2Copper(v) or 0
 			config[info.arg1] = v>0 and v or nil
 		end)
@@ -978,7 +978,7 @@ do
 				sources[source] = nil
 				if not next(sources) then
 					C_Timer.After(.1, function()
-						addon:ConfirmDialog( format("%s\nThis item has no defined price. Do you want to delete this item from the price source list?",itemLink), function()
+						addon:ConfirmDialog( format("%s\nThis item has no defined price. Do you want to remove this item from the individual items list?",itemLink), function()
 							config.priceByItem[itemLink] = nil
 							wipeMenu(menuPriceItems)
 						end )
@@ -1110,7 +1110,9 @@ do
 	local menuFonts
 	do
 		local function set(info)
-			config.fontname = info.value; LayoutFrame()
+			config.fontname = info.value
+			LayoutFrame()
+			refreshMenu()
 		end
 		local function checked(info)
 			return info.value == (config.fontname or FONTS.Arial)
@@ -1118,7 +1120,7 @@ do
 		menuFonts  = { init = function(menu)
 			local media = LibStub("LibSharedMedia-3.0", true)
 			for name, key in pairs(media and media:HashTable('font') or FONTS) do
-				tinsert( menu, { text = name, value = key, func = set, checked = checked } )
+				tinsert( menu, { text = name, value = key, keepShownOnClick = 1, func = set, checked = checked } )
 			end
 			splitMenu(menu)
 			menu.init = nil -- do not call this init function anymore
@@ -1190,7 +1192,7 @@ do
 		end
 		local function setPrice(info)
 			local price = notify.price and notify.price[info.arg1]
-			addon:EditDialog('|cFF7FFF72KiwiFarm|r\n Set the minimum price of the item to display a notification, leave the field blank to remove the minimum price.', FmtMoneyPlain(price), function(v)
+			addon:EditDialog('|cFF7FFF72KiwiFarm|r\n Set the minimum price of the item to display a notification. You can leave the field blank to remove the minimum price.', FmtMoneyPlain(price), function(v)
 				set(info, String2Copper(v) )
 				refreshMenu()
 			end)
@@ -1215,12 +1217,7 @@ do
 		{ text = 'Gold by Day',        notCheckable = true, hasArrow = true, menuList = menuGoldDaily },
 		{ text = 'Resets',             notCheckable = true, hasArrow = true, menuList = menuResets },
 		{ text = 'Settings',           notCheckable = true, isTitle = true },
-		{ text = 'Farming', notCheckable= true, hasArrow = true, menuList = {
-			{ text = 'Display Info', notCheckable= true, hasArrow = true, menuList = {
-				{ text = 'Lock&Resets',      value = 'reset',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
-				{ text = 'Mobs&Items Count', value = 'count',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
-				{ text = 'Gold by Quality',  value = 'quality', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
-			} },
+		--{ text = 'Farming', notCheckable= true, hasArrow = true, menuList = {
 			{ text = 'Prices of Items', notCheckable = true, hasArrow = true, menuList = {
 				{ text = FmtQuality(0), value = 0, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 				{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
@@ -1232,11 +1229,6 @@ do
 				{ text = 'Ignore enchanting mats', isNotRadio = true, keepShownOnClick = 1, checked = function() return config.ignoreEnchantingMats; end, func = function() config.ignoreEnchantingMats = not config.ignoreEnchantingMats or nil; end },
 			} },
 			{ text = 'Farming Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
-			{ text = 'Money Format', notCheckable = true, hasArrow = true, menuList = {
-				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r 99|cffeda55fc|r', 	value = '', 							   checked = MoneyFmtChecked, func = SetMoneyFmt },
-				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 					value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
-				{ text = '999|cffffd70ag|r', 									value = '%d|cffffd70ag|r', 				   checked = MoneyFmtChecked, func = SetMoneyFmt },
-			} },
 			{ text = 'Notifications', notCheckable = true, hasArrow = true, menuList = {
 				{ text = FmtQuality(0),   value = 0,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
 				{ text = FmtQuality(1),   value = 1,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
@@ -1246,8 +1238,19 @@ do
 				{ text = FmtQuality(5),   value = 5,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
 				{ text = 'Minimum Price', value = 'price', notCheckable = true, hasArrow = true, menuList = menuNotifyPrice   },
 			} },
-		} },
-		{ text = 'Frame', notCheckable= true, hasArrow = true, menuList = {
+		---} },
+		{ text = 'Appearance', notCheckable= true, hasArrow = true, menuList = {
+			{ text = 'Display Info', notCheckable= true, hasArrow = true, menuList = {
+				{ text = 'Lock&Resets',      value = 'reset',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+				{ text = 'Mobs&Items Count', value = 'count',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+				{ text = 'Gold by Quality',  value = 'quality', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+			} },
+			{ text = 'Money Format', notCheckable = true, hasArrow = true, menuList = {
+				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r 99|cffeda55fc|r', 	value = '', 							   checked = MoneyFmtChecked, func = SetMoneyFmt },
+				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 					value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
+				{ text = '999|cffffd70ag|r', 									value = '%d|cffffd70ag|r', 				   checked = MoneyFmtChecked, func = SetMoneyFmt },
+			} },
+
 			{ text = 'Frame Anchor', notCheckable= true, hasArrow = true, menuList = {
 				{ text = 'Top Left',     value = 'TOPLEFT',     checked = AnchorChecked, func = SetAnchor },
 				{ text = 'Top Right',    value = 'TOPRIGHT',    checked = AnchorChecked, func = SetAnchor },
@@ -1270,9 +1273,9 @@ do
 				{ text = 'Decrease(-)',  value = -1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 				{ text = 'Default (14)', value =  0,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 			} },
-			{ text ='Background color ', notCheckable = true, hasColorSwatch = true, hasOpacity = true, get = function() return unpack(config.backColor) end, set = function(info, ...) config.backColor = {...}; SetBackground(); end }
+			{ text ='Background color ', notCheckable = true, hasColorSwatch = true, hasOpacity = true, get = function() return unpack(config.backColor) end, set = function(info, ...) config.backColor = {...}; SetBackground(); end },
+			{ text = 'Hide Window', notCheckable = true, func = function() addon:Hide() end },
 		} },
-		{ text = 'Hide Window', notCheckable = true, func = function() addon:Hide() end },
 	}
 	function addon:ShowMenu()
 		showMenu(menuMain, menuFrame, "cursor", 0 , 0, 15)
