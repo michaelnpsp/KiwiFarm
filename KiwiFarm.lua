@@ -9,6 +9,7 @@ local addon = CreateFrame('Frame', "KiwiFarm", UIParent)
 
 -- misc values
 local CLASSIC = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
+local DUMMY = function() end
 
 -- default values
 local RESET_MAX = CLASSIC and 5 or 10
@@ -193,7 +194,6 @@ end
 
 -- dialogs
 do
-	local dummy = function() end
 	StaticPopupDialogs["KIWIFARM_DIALOG"] = { timeout = 0, whileDead = 1, hideOnEscape = 1, button1 = ACCEPT, button2 = CANCEL }
 
 	function addon:ShowDialog(message, textDefault, funcAccept, funcCancel, textAccept, textCancel)
@@ -210,15 +210,15 @@ do
 	end
 
 	function addon:MessageDialog(message, funcAccept)
-		addon:ShowDialog(message, nil, funcAccept or dummy)
+		addon:ShowDialog(message, nil, funcAccept or DUMMY)
 	end
 
 	function addon:ConfirmDialog(message, funcAccept, funcCancel, textAccept, textCancel)
-		self:ShowDialog(message, nil, funcAccept, funcCancel or dummy, textAccept, textCancel )
+		self:ShowDialog(message, nil, funcAccept, funcCancel or DUMMY, textAccept, textCancel )
 	end
 
 	function addon:EditDialog(message, text, funcAccept, funcCancel)
-		self:ShowDialog(message, text or "", funcAccept, funcCancel or dummy)
+		self:ShowDialog(message, text or "", funcAccept, funcCancel or DUMMY)
 	end
 end
 
@@ -243,15 +243,27 @@ do
 			print( fmtLoot(itemLink, quantity, money, true) )
 		end,
 		combat = function(itemLink, quantity, money)
-			local text = fmtLoot(itemLink, quantity, money )
-			if CombatText_AddMessage or LoadAddOn("Blizzard_CombatText") then
-				CombatText_AddMessage(text, CombatText_StandardScroll, 1, 1, 1, nil, false)
+			if CombatText_AddMessage then
+				local text = fmtLoot(itemLink, quantity, money)
+				CombatText_AddMessage(text, COMBAT_TEXT_SCROLL_FUNCTION, 1, 1, 1)
+			else
+				print('|cFF7FFF72KiwiFarm:|r Warning, Blizzard Floating Combat Text is not enabled, change the notifications setup or goto Interface Options>Combat to enable this feature.')
 			end
 		end,
 		crit = function(itemLink, quantity, money)
-			local text = fmtLoot(itemLink, quantity, money )
-			if CombatText_AddMessage or LoadAddOn("Blizzard_CombatText") then
-				CombatText_AddMessage(text, CombatText_StandardScroll, 1, 1, 1, 'crit', false)
+			if CombatText_AddMessage then
+				local text = fmtLoot(itemLink, quantity, money)
+				CombatText_AddMessage(text, COMBAT_TEXT_SCROLL_FUNCTION, 1, 1, 1, 'crit')
+			else
+				print('|cFF7FFF72KiwiFarm:|r Warning, Blizzard Floating Combat Text is not enabled, change the notifications setup or goto Interface Options>Combat to enable this feature.')
+			end
+		end,
+		msbt = function(itemLink, quantity, money)
+			if MikSBT then
+				local text = fmtLoot(itemLink, quantity, money)
+				MikSBT.DisplayMessage(text, MikSBT.DISPLAYTYPE_NOTIFICATION, false, 255, 255, 255)
+			else
+				print('|cFF7FFF72KiwiFarm:|r Warning, MikScrollingCombatText addon is not installed, change the notifications setup or install MSBT.')
 			end
 		end,
 		sound = function(_, _, _, groupKey)
@@ -1212,7 +1224,7 @@ do
 		-- info.value = qualityID | 'price' ; info.arg1 = 'chat'|'combat'|'crit'|'sound'
 		local function initText(info, level)
 			local groupKey = info.value
-			if type(groupKey) ~= 'number' then
+			if type(groupKey) ~= 'number' then -- special cases ('price' and 'money' groups notifications require a minimum price/gold amount)
 				local price = notify[groupKey] and notify[groupKey][info.arg1]
 				return price and format("%s (+%s)", info.arg2, FmtMoneyShort(price)) or format("%s (click to set price)", info.arg2)
 			end
@@ -1233,26 +1245,27 @@ do
 			end
 		end
 		local function setNotify(info)
-			if type(info.value) ~= 'number' then
+			if type(info.value) ~= 'number' then -- 'price' & 'money' groups
 				local price = notify[info.value] and notify[info.value][info.arg1]
 				addon:EditDialog('|cFF7FFF72KiwiFarm|r\nSet the minimum gold amount to display a notification. You can leave the field blank to remove the minimum gold.', FmtMoneyPlain(price), function(v)
 					set(info, String2Copper(v) )
 					refreshMenu(info)
 				end)
-			else
+			else -- quality groups (0-5)
 				set(info, not checked(info) and 0)
 			end
 		end
 		menuNotify = {
-			{ text = initText, useParentValue = true, arg1 = 'chat',   arg2 = 'Chat Text',   		isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
-			{ text = initText, useParentValue = true, arg1 = 'combat', arg2 = 'CombatText: Scroll', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
-			{ text = initText, useParentValue = true, arg1 = 'crit',   arg2 = 'CombatText: Crit',   isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
-			{ text = initText, useParentValue = true, arg1 = 'sound',  arg2 = 'Sound',       		isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'chat',   arg2 = 'Chat Text',   		    isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'combat', arg2 = 'CombatText: Scroll',     isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'crit',   arg2 = 'CombatText: Crit',       isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'msbt',   arg2 = 'MSBT: Notification', 	isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'sound',  arg2 = 'Sound',       		    isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
 			init = function(menu, level)
 				local groupKey = getMenuValue(level)
 				local value = notify[groupKey] and notify[groupKey].sound
-				menu[4].hasArrow = value and true or nil
-				menu[4].menuList = value and menuSounds or nil
+				menu[#menu].hasArrow = value and true or nil
+				menu[#menu].menuList = value and menuSounds or nil
 			end,
 		}
 	end
