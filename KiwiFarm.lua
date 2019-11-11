@@ -62,7 +62,7 @@ local DEFAULTS = {
 	lootedItems           = {},
 	priceByItem           = {},
 	priceByQuality        = { [0]={vendor=true}, [1]={vendor=true}, [2]={vendor=true}, [3]={vendor=true}, [4]={vendor=true}, [5]={vendor=true} },
-	notify 				  = { [1]={chat=true}, [2]={chat=true}, [3]={chat=true}, [4]={chat=true}, [5]={chat=true}, sound={} },
+	notify 				  = { [1]={chat=0}, [2]={chat=0}, [3]={chat=0}, [4]={chat=0}, [5]={chat=0}, sound={} },
 	disabled              = { quality=true },
 	backColor 	          = { 0, 0, 0, .4 },
 	framePos              = { anchor = 'TOPLEFT', x = 0, y = 0 },
@@ -80,6 +80,7 @@ local pairs = pairs
 local unpack = unpack
 local tinsert = tinsert
 local tonumber = tonumber
+local gsub = gsub
 local strfind = strfind
 local floor = math.floor
 local strlower = strlower
@@ -180,7 +181,7 @@ local function FmtMoneyPlain(money)
 end
 
 local function String2Copper(str)
-	str = str:gsub(' ','')
+	str = strlower(gsub(str,' ',''))
 	if str~='' then
 		local c,s,g = tonumber(strmatch(str,"([%d,.]+)c")), tonumber(strmatch(str,"([%d,.]+)s")), tonumber(strmatch(str,"([%d,.]+)g"))
 		if not (c or s or g) then
@@ -239,7 +240,7 @@ do
 				CombatText_AddMessage(text, CombatText_StandardScroll, 1, 1, 1, nil, false)
 			end
 		end,
-		sticky = function(itemLink, quantity, money)
+		crit = function(itemLink, quantity, money)
 			local text = format("%sx%d %s", itemLink, quantity, FmtMoneyShort(money) )
 			if CombatText_AddMessage or LoadAddOn("Blizzard_CombatText") then
 				CombatText_AddMessage(text, CombatText_StandardScroll, 1, 1, 1, 'crit', false)
@@ -608,7 +609,7 @@ do
 	function addon:CHAT_MSG_MONEY(event,msg)
 		if config.sessionStart then
 			wipe(digits)
-			msg:gsub("%d+",func)
+			gsub(msg,"%d+",func)
 			local money = digits[#digits] + (digits[#digits-1] or 0)*100 + (digits[#digits-2] or 0)*10000
 			-- register cash money
 			config.moneyCash = config.moneyCash + money
@@ -748,7 +749,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	timer:SetLooping("REPEAT")
 	timer:SetScript("OnLoop", RefreshText)
 	-- database setup
-	local serverKey = GetRealmName()
+	local serverKey = GetRealmName() .. 'Test'
 	local root = KiwiFarmDB
 	if not root then
 		root = {}; KiwiFarmDB = root
@@ -845,7 +846,7 @@ do
 	-- popup menu main frame
 	local menuFrame = CreateFrame("Frame", "KiwiFarmPopupMenu", UIParent, "UIDropDownMenuTemplate")
 	-- generic & enhanced popup menu management code, reusable for other menus
-	local showMenu, refreshMenu, splitMenu, wipeMenu, getMenuLevel, getMenuValue
+	local showMenu, refreshMenu, getMenuLevel, getMenuValue, splitMenu, wipeMenu
 	do
 		-- menu initialization: special management of enhanced menuList tables, using fields not supported by the base UIDropDownMenu code.
 		local function initialize( frame, level, menuList )
@@ -881,7 +882,7 @@ do
 				UIDropDownMenu_AddButton(item,level)
 			end
 		end
-		-- get the MENU_LEVEL of the specified menu element ( element = DropDownList or button or nil)
+		-- get the MENU_LEVEL of the specified menu element ( element = DropDownList|button|nil )
 		function getMenuLevel(element)
 			return element and ((element.dropdown and element:GetID()) or element:GetParent():GetID()) or UIDROPDOWNMENU_MENU_LEVEL
 		end
@@ -889,7 +890,7 @@ do
 		function getMenuValue(element)
 			return element and (UIDROPDOWNMENU_OPEN_MENU.menuValues[type(element)=='table' and getMenuLevel(element) or element]) or UIDROPDOWNMENU_MENU_VALUE
 		end
-		-- clear menu table, but saving special control fields
+		-- clear menu table, preserving special control fields
 		function wipeMenu(menu)
 			local init = menu.init;	wipe(menu); menu.init = init
 		end
@@ -944,7 +945,7 @@ do
 				table.remove(menu,i)
 			end
 		end
-		return true -- means do not call the function anymore
+		menu.init = nil -- means do not call the function anymore
 	end
 	local function SetBackground()
 		texture:SetColorTexture( unpack(config.backColor or COLOR_TRANSPARENT) )
@@ -978,24 +979,6 @@ do
 	local function SetDisplay(info)
 		disabled[info.value] = (not disabled[info.value]) or nil
 		PrepareText(); LayoutFrame(); RefreshText()
-	end
-	local function MinPriceChecked(info)
-		return config[info.arg1]~=nil
-	end
-	local function GetMinPriceText(info)
-		return config[info.arg1] and "Price above: "..FmtMoneyShort(config[info.arg1]) or "Minimum Price"
-	end
-	local function SetMinPrice(info)
-		addon:EditDialog('|cFF7FFF72KiwiFarm|r\nSet the minimum price to display looted items in chat. You can leave the field blank to remove the minimum price.', FmtMoneyPlain(config[info.arg1]), function(v)
-			v = String2Copper(v) or 0
-			config[info.arg1] = v>0 and v or nil
-		end)
-	end
-	local function NotifyQualityChecked(info)
-		return config[info.arg1][info.value]
-	end
-	local function SetNotifyQuality(info)
-		config[info.arg1][info.value] = (not config[info.arg1][info.value]) or nil
 	end
 	-- submenu: quality sources
 	local menuQualitySources
@@ -1214,7 +1197,7 @@ do
 	-- submenu: notify
 	local menuNotifyQuality, menuNotifyPrice
 	do
-		-- info.value = qualityID | 'price' ; info.arg1 = 'chat'|'combat'|'sticky'|'sound'
+		-- info.value = qualityID | 'price' ; info.arg1 = 'chat'|'combat'|'crit'|'sound'
 		local function init(menu, level)
 			local groupKey = getMenuValue(level)
 			local value = notify[groupKey] and notify[groupKey].sound
@@ -1230,7 +1213,7 @@ do
 			notify[groupKey] = notify[groupKey] or {}
 			notify[groupKey][channelKey] = value or nil
 			if not next(notify[groupKey]) then notify[groupKey] = nil end
-			if channelKey=='sound' then
+			if channelKey=='sound' then -- special case for sounds
 				notify.sound[groupKey] = nil
 				refreshMenu(getMenuLevel(info), true)
 			end
@@ -1242,7 +1225,7 @@ do
 		menuNotifyQuality = {
 			{ text = 'Chat Text',           useParentValue = true, arg1 = 'chat',   isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
 			{ text = 'Combat Text: Scroll', useParentValue = true, arg1 = 'combat', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
-			{ text = 'Combat Text: Crit',   useParentValue = true, arg1 = 'sticky', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
+			{ text = 'Combat Text: Crit',   useParentValue = true, arg1 = 'crit',   isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
 			{ text = 'Sound',               useParentValue = true, arg1 = 'sound',  isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
 			init = init,
 		}
@@ -1263,10 +1246,10 @@ do
 			end)
 		end
 		menuNotifyPrice = {
-			{ text = getPriceText, useParentValue = true, arg1 = 'chat',   arg2 = 'Chat Text',   		 isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
-			{ text = getPriceText, useParentValue = true, arg1 = 'combat', arg2 = 'Combat Text: Scroll', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
-			{ text = getPriceText, useParentValue = true, arg1 = 'sticky', arg2 = 'Combat Text: Crit',   isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
-			{ text = getPriceText, useParentValue = true, arg1 = 'sound',  arg2 = 'Sound',       		 isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
+			{ text = getPriceText, useParentValue = true, arg1 = 'chat',   arg2 = 'Chat Text',   		isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
+			{ text = getPriceText, useParentValue = true, arg1 = 'combat', arg2 = 'CombatText: Scroll', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
+			{ text = getPriceText, useParentValue = true, arg1 = 'crit',   arg2 = 'CombatText: Crit',   isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
+			{ text = getPriceText, useParentValue = true, arg1 = 'sound',  arg2 = 'Sound',       		isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
 			init = init,
 		}
 	end
@@ -1310,9 +1293,9 @@ do
 				{ text = 'Gold by Quality',  value = 'quality', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 			} },
 			{ text = 'Money Format', notCheckable = true, hasArrow = true, menuList = {
-				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r 99|cffeda55fc|r', 	value = '', 							   checked = MoneyFmtChecked, func = SetMoneyFmt },
-				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 					value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
-				{ text = '999|cffffd70ag|r', 									value = '%d|cffffd70ag|r', 				   checked = MoneyFmtChecked, func = SetMoneyFmt },
+				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r 99|cffeda55fc|r', value = '', 							    checked = MoneyFmtChecked, func = SetMoneyFmt },
+				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 				 value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
+				{ text = '999|cffffd70ag|r', 								 value = '%d|cffffd70ag|r', 				checked = MoneyFmtChecked, func = SetMoneyFmt },
 			} },
 			{ text = 'Frame Anchor', notCheckable= true, hasArrow = true, menuList = {
 				{ text = 'Top Left',     value = 'TOPLEFT',     checked = AnchorChecked, func = SetAnchor },
