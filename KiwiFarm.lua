@@ -229,19 +229,27 @@ end
 -- notification funcions
 local Notify, NotifyEnd
 do
+	local function fmtLoot(itemLink, quantity, money, pref )
+		local prefix = pref and '|cFF7FFF72KiwiFarm:|r ' or ''
+		if itemLink then
+			return format("%s%sx%d %s", prefix, itemLink, quantity, FmtMoneyShort(money) )
+		else
+			return format("%sYou loot %s", prefix, FmtMoneyShort(money) )
+		end
+	end
 	local notified = {}
 	local channels = {
 		chat = function(itemLink, quantity, money)
-			print( format("|cFF7FFF72KiwiFarm:|r %sx%d %s", itemLink, quantity, FmtMoneyShort(money) ) )
+			print( fmtLoot(itemLink, quantity, money, true) )
 		end,
 		combat = function(itemLink, quantity, money)
-			local text = format("%sx%d %s", itemLink, quantity, FmtMoneyShort(money) )
+			local text = fmtLoot(itemLink, quantity, money )
 			if CombatText_AddMessage or LoadAddOn("Blizzard_CombatText") then
 				CombatText_AddMessage(text, CombatText_StandardScroll, 1, 1, 1, nil, false)
 			end
 		end,
 		crit = function(itemLink, quantity, money)
-			local text = format("%sx%d %s", itemLink, quantity, FmtMoneyShort(money) )
+			local text = fmtLoot(itemLink, quantity, money )
 			if CombatText_AddMessage or LoadAddOn("Blizzard_CombatText") then
 				CombatText_AddMessage(text, CombatText_StandardScroll, 1, 1, 1, 'crit', false)
 			end
@@ -616,6 +624,10 @@ do
 			-- register daily money
 			local dailyKey = date("%Y/%m/%d")
 			config.moneyDaily[dailyKey] = (config.moneyDaily[dailyKey] or 0) + money
+			-- notify
+			if notify.money then
+				Notify('money', nil, nil, money); NotifyEnd()
+			end
 		end
 	end
 end
@@ -749,7 +761,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	timer:SetLooping("REPEAT")
 	timer:SetScript("OnLoop", RefreshText)
 	-- database setup
-	local serverKey = GetRealmName() .. 'Test'
+	local serverKey = GetRealmName()
 	local root = KiwiFarmDB
 	if not root then
 		root = {}; KiwiFarmDB = root
@@ -859,6 +871,9 @@ do
 			end
 			for index=1,#menuList do
 				local item = menuList[index]
+				if item.useParentValue then -- use the value of the parent popup, needed to make splitMenu() transparent
+					item.value = UIDROPDOWNMENU_MENU_VALUE
+				end
 				if type(item.text)=='function' then -- save function text in another field for later use
 					item.textf = item.text
 				end
@@ -874,9 +889,6 @@ do
 					end
 					item.r, item.g, item.b, item.opacity = item.get(item)
 					item.opacity = 1 - item.opacity
-				end
-				if item.useParentValue then -- use the value of the parent popup, needed to make splitMenu() transparent
-					item.value = UIDROPDOWNMENU_MENU_VALUE
 				end
 				item.index = index
 				UIDropDownMenu_AddButton(item,level)
@@ -1195,14 +1207,16 @@ do
 		end }
 	end
 	-- submenu: notify
-	local menuNotifyQuality, menuNotifyPrice
+	local menuNotify
 	do
 		-- info.value = qualityID | 'price' ; info.arg1 = 'chat'|'combat'|'crit'|'sound'
-		local function init(menu, level)
-			local groupKey = getMenuValue(level)
-			local value = notify[groupKey] and notify[groupKey].sound
-			menu[4].hasArrow = value and true or nil
-			menu[4].menuList = value and menuSounds or nil
+		local function initText(info, level)
+			local groupKey = info.value
+			if type(groupKey) ~= 'number' then
+				local price = notify[groupKey] and notify[groupKey][info.arg1]
+				return price and format("%s (+%s)", info.arg2, FmtMoneyShort(price)) or format("%s (click to set price)", info.arg2)
+			end
+			return info.arg2
 		end
 		local function checked(info)
 			local groupKey, channelKey = info.value, info.arg1
@@ -1218,39 +1232,28 @@ do
 				refreshMenu(getMenuLevel(info), true)
 			end
 		end
-		-- menuNotifyQuality
-		local function setQuality(info)
-			set(info, not checked(info) and 0)
-		end
-		menuNotifyQuality = {
-			{ text = 'Chat Text',           useParentValue = true, arg1 = 'chat',   isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
-			{ text = 'Combat Text: Scroll', useParentValue = true, arg1 = 'combat', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
-			{ text = 'Combat Text: Crit',   useParentValue = true, arg1 = 'crit',   isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
-			{ text = 'Sound',               useParentValue = true, arg1 = 'sound',  isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setQuality },
-			init = init,
-		}
-		-- menuNotifyPrice
-		local function getPriceText(info)
-			local price = notify.price and notify.price[info.arg1]
-			if price then
-				return format( "%s (price +%s)", info.arg2, FmtMoneyShort(price) )
+		local function setNotify(info)
+			if type(info.value) ~= 'number' then
+				local price = notify[info.value] and notify[info.value][info.arg1]
+				addon:EditDialog('|cFF7FFF72KiwiFarm|r\nSet the minimum gold amount to display a notification. You can leave the field blank to remove the minimum gold.', FmtMoneyPlain(price), function(v)
+					set(info, String2Copper(v) )
+					refreshMenu(info)
+				end)
 			else
-				return format( "%s (click to set price)", info.arg2 )
+				set(info, not checked(info) and 0)
 			end
 		end
-		local function setPrice(info)
-			local price = notify.price and notify.price[info.arg1]
-			addon:EditDialog('|cFF7FFF72KiwiFarm|r\n Set the minimum price to display a notification. You can leave the field blank to remove the minimum price.', FmtMoneyPlain(price), function(v)
-				set(info, String2Copper(v) )
-				refreshMenu(info)
-			end)
-		end
-		menuNotifyPrice = {
-			{ text = getPriceText, useParentValue = true, arg1 = 'chat',   arg2 = 'Chat Text',   		isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
-			{ text = getPriceText, useParentValue = true, arg1 = 'combat', arg2 = 'CombatText: Scroll', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
-			{ text = getPriceText, useParentValue = true, arg1 = 'crit',   arg2 = 'CombatText: Crit',   isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
-			{ text = getPriceText, useParentValue = true, arg1 = 'sound',  arg2 = 'Sound',       		isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setPrice },
-			init = init,
+		menuNotify = {
+			{ text = initText, useParentValue = true, arg1 = 'chat',   arg2 = 'Chat Text',   		isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'combat', arg2 = 'CombatText: Scroll', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'crit',   arg2 = 'CombatText: Crit',   isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'sound',  arg2 = 'Sound',       		isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			init = function(menu, level)
+				local groupKey = getMenuValue(level)
+				local value = notify[groupKey] and notify[groupKey].sound
+				menu[4].hasArrow = value and true or nil
+				menu[4].menuList = value and menuSounds or nil
+			end,
 		}
 	end
 	-- menu: main
@@ -1278,13 +1281,14 @@ do
 		} },
 		{ text = 'Farming Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
 		{ text = 'Notifications', notCheckable = true, hasArrow = true, menuList = {
-			{ text = FmtQuality(0),   value = 0,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
-			{ text = FmtQuality(1),   value = 1,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
-			{ text = FmtQuality(2),   value = 2,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
-			{ text = FmtQuality(3),   value = 3,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
-			{ text = FmtQuality(4),   value = 4,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
-			{ text = FmtQuality(5),   value = 5,       notCheckable = true, hasArrow = true, menuList = menuNotifyQuality },
-			{ text = 'Minimum Price', value = 'price', notCheckable = true, hasArrow = true, menuList = menuNotifyPrice   },
+			{ text = FmtQuality(0),     value = 0,       notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(1),     value = 1,       notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(2),     value = 2,       notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(3),     value = 3,       notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(4),     value = 4,       notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(5),     value = 5,       notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = 'Prices of items', value = 'price', notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = 'Money looted',    value = 'money', notCheckable = true, hasArrow = true, menuList = menuNotify },
 		} },
 		{ text = 'Appearance', notCheckable= true, hasArrow = true, menuList = {
 			{ text = 'Display Info', notCheckable= true, hasArrow = true, menuList = {
