@@ -745,6 +745,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	-- unregister init events
 	addon:UnregisterAllEvents()
 	-- main frame init
+	addon:SetSize(1,1) -- without this LayoutFrame() calculates a wrong frame size, becaouse textl:GetHeight() returns an incorrect height on first login
 	addon:EnableMouse(true)
 	addon:SetMovable(true)
 	addon:RegisterForDrag("LeftButton")
@@ -821,8 +822,6 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	-- session
 	if config.sessionStart then
 		SessionStart(true)
-	else
-		RefreshText()
 	end
 	-- mainframe initial visibility
 	addon:SetShown( config.visible and (not config.zones or config.reloadUI) )
@@ -869,6 +868,7 @@ end
 do
 	-- popup menu main frame
 	local menuFrame = CreateFrame("Frame", "KiwiFarmPopupMenu", UIParent, "UIDropDownMenuTemplate")
+
 	-- generic & enhanced popup menu management code, reusable for other menus
 	local showMenu, refreshMenu, getMenuLevel, getMenuValue, splitMenu, wipeMenu
 	do
@@ -876,34 +876,34 @@ do
 		local function initialize( frame, level, menuList )
 			if level then
 				frame.menuValues[level] = UIDROPDOWNMENU_MENU_VALUE
-			end
-			local init = menuList.init
-			if init then -- custom initialization function for the menuList
-				init(menuList, level, frame)
-			end
-			for index=1,#menuList do
-				local item = menuList[index]
-				if item.useParentValue then -- use the value of the parent popup, needed to make splitMenu() transparent
-					item.value = UIDROPDOWNMENU_MENU_VALUE
+				local init = menuList.init
+				if init then -- custom initialization function for the menuList
+					init(menuList, level, frame)
 				end
-				if type(item.text)=='function' then -- save function text in another field for later use
-					item.textf = item.text
-				end
-				if item.textf then -- text support for functions instead of only strings
-					item.text = item.textf(item, level, frame)
-				end
-				if item.hasColorSwatch then -- simplified color management, only definition of get&set functions required to retrieve&save the color
-					if not item.swatchFunc then
-						local get, set = item.get, item.set
-						item.swatchFunc  = function() local r,g,b,a = get(item); r,g,b = ColorPickerFrame:GetColorRGB(); set(item,r,g,b,a) end
-						item.opacityFunc = function() local r,g,b   = get(item); set(item, r,g,b,1-OpacitySliderFrame:GetValue()) end
-						item.cancelFunc  = function(c) set(item, c.r, c.g, c.b, 1-c.opacity) end
+				for index=1,#menuList do
+					local item = menuList[index]
+					if item.useParentValue then -- use the value of the parent popup, needed to make splitMenu() transparent
+						item.value = UIDROPDOWNMENU_MENU_VALUE
 					end
-					item.r, item.g, item.b, item.opacity = item.get(item)
-					item.opacity = 1 - item.opacity
+					if type(item.text)=='function' then -- save function text in another field for later use
+						item.textf = item.text
+					end
+					if item.textf then -- text support for functions instead of only strings
+						item.text = item.textf(item, level, frame)
+					end
+					if item.hasColorSwatch then -- simplified color management, only definition of get&set functions required to retrieve&save the color
+						if not item.swatchFunc then
+							local get, set = item.get, item.set
+							item.swatchFunc  = function() local r,g,b,a = get(item); r,g,b = ColorPickerFrame:GetColorRGB(); set(item,r,g,b,a) end
+							item.opacityFunc = function() local r,g,b   = get(item); set(item, r,g,b,1-OpacitySliderFrame:GetValue()) end
+							item.cancelFunc  = function(c) set(item, c.r, c.g, c.b, 1-c.opacity) end
+						end
+						item.r, item.g, item.b, item.opacity = item.get(item)
+						item.opacity = 1 - item.opacity
+					end
+					item.index = index
+					UIDropDownMenu_AddButton(item,level)
 				end
-				item.index = index
-				UIDropDownMenu_AddButton(item,level)
 			end
 		end
 		-- get the MENU_LEVEL of the specified menu element ( element = DropDownList|button|nil )
@@ -962,6 +962,7 @@ do
 			ToggleDropDownMenu(1, nil, menuFrame, anchor, x, y, menuList, nil, autoHideDelay);
 		end
 	end
+
 	-- here starts the definition of the KiwiFrame menu, misc functions
 	local function InitPriceSources(menu)
 		for i=#menu,1,-1 do
@@ -1004,6 +1005,7 @@ do
 		disabled[info.value] = (not disabled[info.value]) or nil
 		PrepareText(); LayoutFrame(); RefreshText()
 	end
+
 	-- submenu: quality sources
 	local menuQualitySources
 	do
@@ -1024,6 +1026,7 @@ do
 			init = InitPriceSources
 		}
 	end
+
 	-- submenus: item sources, price sources
 	local menuPriceItems, menuItemSources
 	do
@@ -1069,6 +1072,7 @@ do
 			local price = getItemPriceSource(getMenuValue(level),'user')
 			return format( 'Price: %s', price and FmtMoneyShort(price) or 'Not Defined')
 		end
+
 		-- submenu: item price sources
 		menuItemSources = {
 			{ text = getText,	  				  value = 'user',         				isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
@@ -1080,6 +1084,7 @@ do
 			{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
 			init = InitPriceSources,
 		}
+
 		-- submenu: individual items prices
 		menuPriceItems = { init = function(menu)
 			if not menu[1] then
@@ -1091,6 +1096,7 @@ do
 			end
 		end	}
 	end
+
 	-- submenu: looted items
 	local menuLootedItems
 	do
@@ -1113,6 +1119,7 @@ do
 			end
 		end }
 	end
+
 	-- submenu: zones
 	local menuZones
 	do
@@ -1149,6 +1156,7 @@ do
 			menu[i], item = item, nil
 		end
 	end	}
+
 	-- submenu: gold earned by item quality
 	local menuGoldQuality = { init = function(menu)
 		for i=1,5 do
@@ -1156,6 +1164,7 @@ do
 			menu[i].text = format( "%s: %s (%d)", FmtQuality(i-1), FmtMoney(config.moneyByQuality[i-1] or 0), config.countByQuality[i-1] or 0)
 		end
 	end }
+
 	-- submenu: gold earned by day
 	local menuGoldDaily = {	init = function(menu)
 		local tim, pre, key, money = time()
@@ -1167,6 +1176,7 @@ do
 			tim = tim - 86400
 		end
 	end	}
+
 	-- submenu: fonts
 	local menuFonts
 	do
@@ -1187,6 +1197,7 @@ do
 			menu.init = nil -- do not call this init function anymore
 		end }
 	end
+
 	-- submenu: sounds
 	local menuSounds
 	do
@@ -1218,6 +1229,7 @@ do
 			menu.init = nil -- do not call this init function anymore
 		end }
 	end
+
 	-- submenu: notify
 	local menuNotify
 	do
@@ -1269,6 +1281,7 @@ do
 			end,
 		}
 	end
+
 	-- menu: main
 	local menuMain = {
 		{ text = 'Kiwi Farm [/kfarm]', notCheckable = true, isTitle = true },
@@ -1292,17 +1305,17 @@ do
 			{ text = 'Individual Items', notCheckable= true, hasArrow = true, menuList = menuPriceItems },
 			{ text = 'Ignore enchanting mats', isNotRadio = true, keepShownOnClick = 1, checked = function() return config.ignoreEnchantingMats; end, func = function() config.ignoreEnchantingMats = not config.ignoreEnchantingMats or nil; end },
 		} },
-		{ text = 'Farming Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
 		{ text = 'Notifications', notCheckable = true, hasArrow = true, menuList = {
-			{ text = FmtQuality(0),     value = 0,       notCheckable = true, hasArrow = true, menuList = menuNotify },
-			{ text = FmtQuality(1),     value = 1,       notCheckable = true, hasArrow = true, menuList = menuNotify },
-			{ text = FmtQuality(2),     value = 2,       notCheckable = true, hasArrow = true, menuList = menuNotify },
-			{ text = FmtQuality(3),     value = 3,       notCheckable = true, hasArrow = true, menuList = menuNotify },
-			{ text = FmtQuality(4),     value = 4,       notCheckable = true, hasArrow = true, menuList = menuNotify },
-			{ text = FmtQuality(5),     value = 5,       notCheckable = true, hasArrow = true, menuList = menuNotify },
-			{ text = 'Prices of items', value = 'price', notCheckable = true, hasArrow = true, menuList = menuNotify },
-			{ text = 'Money looted',    value = 'money', notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = 'Items looted', value = 'price', notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(0),  value = 0,       notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(1),  value = 1,       notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(2),  value = 2,       notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(3),  value = 3,       notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(4),  value = 4,       notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(5),  value = 5,       notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = 'Money looted', value = 'money', notCheckable = true, hasArrow = true, menuList = menuNotify },
 		} },
+		{ text = 'Farming Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
 		{ text = 'Appearance', notCheckable= true, hasArrow = true, menuList = {
 			{ text = 'Display Info', notCheckable= true, hasArrow = true, menuList = {
 				{ text = 'Lock&Resets',      value = 'reset',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
@@ -1340,6 +1353,7 @@ do
 			{ text = 'Hide Window', notCheckable = true, func = function() addon:Hide() end },
 		} },
 	}
+
 	function addon:ShowMenu()
 		showMenu(menuMain, menuFrame, "cursor", 0 , 0)
 	end
