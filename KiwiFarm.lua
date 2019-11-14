@@ -102,6 +102,7 @@ local disabled -- disabled texts table
 local notify   -- notifications table
 
 -- miscellaneous variables
+local inInstance
 local combatActive
 local combatCurKills = 0
 local combatPreKills = 0
@@ -459,6 +460,31 @@ do
 	end
 end
 
+-- adjust the money stats of a looted item whose price was changed by the user.
+local function AdjustLootedItemMoneyStats(itemLink)
+	local lootedItem = config.lootedItems[itemLink]
+	if lootedItem then
+		local newPrice, quality = GetItemPrice(itemLink)
+		if newPrice then
+			local newMoney = newPrice * lootedItem.quantity
+			local moneyDiff = newMoney - lootedItem.money
+			if moneyDiff ~= 0 then
+				-- item
+				lootedItem.money = newMoney
+				-- total
+				config.moneyItems = math.max(0, config.moneyItems + moneyDiff)
+				-- quality
+				config.moneyByQuality[quality] = math.max(0, config.moneyByQuality[quality] + moneyDiff)
+				-- daily
+				local dailyKey = date("%Y/%m/%d")
+				config.moneyDaily[dailyKey] = math.max(0, config.moneyDaily[dailyKey] + moneyDiff)
+				--
+				RefreshText()
+			end
+		end
+	end
+end
+
 -- register instance reset
 local function AddReset()
 	local curtime = time()
@@ -531,6 +557,13 @@ local function SavePosition()
 	p.x, p.y = x-cx, y-cy
 end
 
+-- frame sizing
+local function UpdateFrameSize()
+	addon:SetHeight( textl:GetHeight() + MARGIN*2 )
+	addon:SetWidth( config.frameWidth or (textl:GetWidth() * 2.3) + MARGIN*2 )
+	addon:SetScript('OnUpdate', nil)
+end
+
 -- layout main frame
 local function LayoutFrame()
 	-- background
@@ -550,9 +583,8 @@ local function LayoutFrame()
 	textr:SetJustifyV('TOP')
 	textr:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
 	RefreshText()
-	-- frame size
-	addon:SetHeight( textl:GetHeight() + MARGIN*2 )
-	addon:SetWidth( config.frameWidth or (textl:GetWidth() * 2.3) + MARGIN*2 )
+	-- delayed frame sizing, because textl:GetHeight() returns incorrect height on first login for some fonts.
+	addon:SetScript("OnUpdate", UpdateFrameSize)
 end
 
 -- ============================================================================
@@ -598,12 +630,12 @@ function addon:CHAT_MSG_LOOT(event,msg)
 				-- register item looted
 				local lootedItem = config.lootedItems[itemLink]
 				if not lootedItem then
-					lootedItem = { 0, 0 }
+					lootedItem = { money = 0, quantity = 0 }
 					config.lootedItems[itemLink] = lootedItem
 					timeLootedItems = time()
 				end
-				lootedItem[1] = lootedItem[1] + quantity
-				lootedItem[2] = lootedItem[2] + money
+				lootedItem.quantity = lootedItem.quantity + quantity
+				lootedItem.money    = lootedItem.money    + money
 				-- register item money earned
 				config.moneyItems = config.moneyItems + money
 				config.moneyByQuality[rarity] = (config.moneyByQuality[rarity] or 0) + money
@@ -662,15 +694,15 @@ do
 	function addon:ZONE_CHANGED_NEW_AREA(event)
 		local zone = GetZoneText()
 		if zone and zone~='' then
-			local inst = IsInInstance()
-			local zoneKey = format("%s:%s",zone,tostring(inst))
+			inInstance = IsInInstance()
+			local zoneKey = format("%s:%s",zone,tostring(inInstance))
 			if zoneKey ~= lastZoneKey or (not event) then -- no event => called from config
-				if inst and #resets>=RESET_MAX then -- locked but inside instance, means locked expired before estimated unlock time
+				if inInstance and #resets>=RESET_MAX then -- locked but inside instance, means locked expired before estimated unlock time
 					table.remove(resets,1)
 				end
 				if config.zones then
 					if config.zones[zone] then
-						if inst and lastZoneKey then
+						if inInstance and lastZoneKey then
 							SessionStart()
 						else
 							RefreshText()
@@ -682,13 +714,6 @@ do
 					end
 				elseif self:IsVisible() then
 					RefreshText()
-				end
-				if config.sessionStart then -- to track when the instance save is used (mobs killed)
-					if inst then
-						self:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
-					else
-						self:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
-					end
 				end
 				if config.reloadUI then -- clear reloadUI flag if set
 					config.reloadUI = nil
@@ -722,7 +747,7 @@ end
 function addon:COMBAT_LOG_EVENT_UNFILTERED()
 	local _, eventType,_,_,_,_,_,dstGUID,_,dstFlags = CombatLogGetCurrentEventInfo()
 	if eventType == 'UNIT_DIED' and band(dstFlags,COMBATLOG_OBJECT_CONTROL_NPC)~=0 then
-		if not config.lockspent then
+		if inInstance and not config.lockspent then
 			config.lockspent = time()
 			timer:Play()
 		end
@@ -745,7 +770,8 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	-- unregister init events
 	addon:UnregisterAllEvents()
 	-- main frame init
-	addon:SetSize(1,1) -- without this LayoutFrame() calculates a wrong frame size, becaouse textl:GetHeight() returns an incorrect height on first login
+	addon:Hide()
+	addon:SetSize(1,1)
 	addon:EnableMouse(true)
 	addon:SetMovable(true)
 	addon:RegisterForDrag("LeftButton")
@@ -761,12 +787,8 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	texture:SetAllPoints()
 	-- text left
 	textl = addon:CreateFontString()
-	textl:SetPoint('TOPLEFT')
-	textl:SetJustifyH('LEFT')
 	-- text right
 	textr = addon:CreateFontString()
-	textr:SetPoint('TOPRIGHT')
-	textr:SetJustifyH('RIGHT')
 	-- timer
 	timer = addon:CreateAnimationGroup()
 	timer.animation = timer:CreateAnimation()
@@ -1030,7 +1052,18 @@ do
 	-- submenus: item sources, price sources
 	local menuPriceItems, menuItemSources
 	do
-		local function setItemPriceSource(itemLink, source, value)
+		local function deleteItem(itemLink, confirm)
+			if not confirm then
+				config.priceByItem[itemLink] = nil
+				wipeMenu(menuPriceItems)
+				AdjustLootedItemMoneyStats(itemLink)
+				return
+			end
+			C_Timer.After(.1,function()
+				addon:ConfirmDialog( format("%s\nThis item has no defined price. Do you want to delete this item?",itemLink), function() deleteItem(itemLink) end)
+			end)
+		end
+		local function setItemPriceSource(info, itemLink, source, value)
 			local sources = config.priceByItem[itemLink]
 			if value then
 				if not sources then
@@ -1041,14 +1074,10 @@ do
 			elseif sources then
 				sources[source] = nil
 				if not next(sources) then
-					C_Timer.After(.1, function()
-						addon:ConfirmDialog( format("%s\nThis item has no defined price. Do you want to remove this item from the individual items list?",itemLink), function()
-							config.priceByItem[itemLink] = nil
-							wipeMenu(menuPriceItems)
-						end )
-					end )
+					deleteItem(itemLink, info.arg2 )
 				end
 			end
+			AdjustLootedItemMoneyStats(itemLink)
 		end
 		local function getItemPriceSource(itemLink, source)
 			local sources  = config.priceByItem[itemLink]
@@ -1058,21 +1087,21 @@ do
 			return getItemPriceSource(getMenuValue(info), info.value)
 		end
 		local function set(info)
+			info.arg2 = getMenuValue(getMenuLevel(info)-1)=='specific'
 			local itemLink, empty = getMenuValue(info)
 			if info.value=='user' then
 				local price    = FmtMoneyPlain( getItemPriceSource(itemLink,'user') ) or ''
 				addon:EditDialog('|cFF7FFF72KiwiFarm|r\n Set a custom price for:\n' .. itemLink, price, function(v)
-					setItemPriceSource(itemLink, 'user', String2Copper(v))
+					setItemPriceSource(info, itemLink, 'user', String2Copper(v))
 				end)
 			else
-				setItemPriceSource( itemLink, info.value , not getItemPriceSource(itemLink, info.value) )
+				setItemPriceSource(info, itemLink, info.value , not getItemPriceSource(itemLink, info.value))
 			end
 		end
 		local function getText(info, level)
 			local price = getItemPriceSource(getMenuValue(level),'user')
 			return format( 'Price: %s', price and FmtMoneyShort(price) or 'Not Defined')
 		end
-
 		-- submenu: item price sources
 		menuItemSources = {
 			{ text = getText,	  				  value = 'user',         				isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
@@ -1084,7 +1113,6 @@ do
 			{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
 			init = InitPriceSources,
 		}
-
 		-- submenu: individual items prices
 		menuPriceItems = { init = function(menu)
 			if not menu[1] then
@@ -1102,7 +1130,7 @@ do
 	do
 		local function getText(info)
 			local data = config.lootedItems[info.value]
-			return data and format("%sx%d %s", info.value, data[1], FmtMoneyShort(data[2])) or info.value
+			return data and format("%sx%d %s", info.value, data.quantity, FmtMoneyShort(data.money)) or info.value
 		end
 		menuLootedItems = { init = function(menu)
 			if timeLootedItems>(menu.time or -1) then
@@ -1145,6 +1173,7 @@ do
 			end
 		end	}
 	end
+
 	-- submenu: resets
 	local menuResets = { init = function(menu)
 		local item = { text = 'None', notCheckable = true }
@@ -1302,17 +1331,17 @@ do
 			{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 			{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 			{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
-			{ text = 'Individual Items', notCheckable= true, hasArrow = true, menuList = menuPriceItems },
+			{ text = 'Specific Items', notCheckable= true, hasArrow = true, value = 'specific' ,menuList = menuPriceItems },
 			{ text = 'Ignore enchanting mats', isNotRadio = true, keepShownOnClick = 1, checked = function() return config.ignoreEnchantingMats; end, func = function() config.ignoreEnchantingMats = not config.ignoreEnchantingMats or nil; end },
 		} },
 		{ text = 'Notifications', notCheckable = true, hasArrow = true, menuList = {
-			{ text = 'Items looted', value = 'price', notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = FmtQuality(0),  value = 0,       notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = FmtQuality(1),  value = 1,       notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = FmtQuality(2),  value = 2,       notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = FmtQuality(3),  value = 3,       notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = FmtQuality(4),  value = 4,       notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = FmtQuality(5),  value = 5,       notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = 'All Items looted', value = 'price', notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = 'Money looted', value = 'money', notCheckable = true, hasArrow = true, menuList = menuNotify },
 		} },
 		{ text = 'Farming Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
