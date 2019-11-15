@@ -9,7 +9,6 @@ local addon = CreateFrame('Frame', "KiwiFarm", UIParent)
 
 -- misc values
 local CLASSIC = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
-local DUMMY = function() end
 
 -- default values
 local RESET_MAX = CLASSIC and 5 or 10
@@ -19,7 +18,7 @@ local FONTS = {
 	Arial = 'Fonts\\ARIALN.TTF',
 	FrizQT = 'Fonts\\FRIZQT__.TTF',
 	Morpheus = 'Fonts\\MORPHEUS.TTF',
-	Skurri = 'Fonts\\SKURRI.TTF'
+	Skurri = 'Fonts\\SKURRI.TTF',
 }
 local SOUNDS = CLASSIC and {
 	["Auction Window Open"] = "sound/interface/auctionwindowopen.ogg",
@@ -51,24 +50,45 @@ local SOUNDS = CLASSIC and {
 	["Quest List Open"] = 567504,
 }
 
+local DEFDATA = {
+	moneyCash      = 0,
+	moneyItems     = 0,
+	moneyByQuality = {},
+	countItems     = 0,
+	countByQuality = {},
+	lootedItems    = {},
+	mobKills       = 0,
+}
+
 -- database defaults
-local DEFAULTS = {
-	mobKills              = 0,
-	moneyCash             = 0,
-	moneyItems            = 0,
-	countItems            = 0,
-	moneyDaily            = {},
-	moneyByQuality        = {},
-	countByQuality        = {},
-	lootedItems           = {},
-	priceByItem           = {},
-	priceByQuality        = { [0]={vendor=true}, [1]={vendor=true}, [2]={vendor=true}, [3]={vendor=true}, [4]={vendor=true}, [5]={vendor=true} },
-	notify 				  = { [1]={chat=0}, [2]={chat=0}, [3]={chat=0}, [4]={chat=0}, [5]={chat=0}, sound={} },
-	disabled              = { quality=true },
-	backColor 	          = { 0, 0, 0, .4 },
-	framePos              = { anchor = 'TOPLEFT', x = 0, y = 0 },
-	visible               = true,
-	minimapIcon           = { hide = false },
+local DEFAULT = {
+	-- session ctrl
+	sessionStart =nil,
+	sessionDuration = nil,
+	-- data/stats
+	session = {},
+	total   = {},
+	daily   = {},
+	-- instance locks&resets
+	resets 	= {},
+	lockSpent = nil,
+	-- prices
+	priceByItem = {},
+	priceByQuality = { [0]={vendor=true}, [1]={vendor=true}, [2]={vendor=true}, [3]={vendor=true}, [4]={vendor=true}, [5]={vendor=true} },
+	ignoreEnchantingMats = nil,
+	-- farming zones
+	zones = nil,
+	-- loot notification
+	notify = { [1]={chat=0}, [2]={chat=0}, [3]={chat=0}, [4]={chat=0}, [5]={chat=0}, sound={} },
+	-- appearance
+	visible     = true, -- main frame visibility
+	moneyFmt    = nil,
+	disabled    = { quality=true }, -- disabled text sections
+	backColor 	= { 0, 0, 0, .4 },
+	fontName    = nil,
+	fontsize    = nil,
+	framePos    = { anchor = 'TOPLEFT', x = 0, y = 0 },
+	minimapIcon = { hide = false },
 }
 
 -- local references
@@ -97,9 +117,10 @@ local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
 
 -- database references
 local config   -- database realm table
-local resets   -- instance resets table
-local disabled -- disabled texts table
-local notify   -- notifications table
+local session  -- config.session
+local resets   -- config.resets     instance resets table
+local disabled -- config.disabled   texts table
+local notify   -- config.notify     notifications table
 
 -- miscellaneous variables
 local inInstance
@@ -117,6 +138,34 @@ local timer   -- update timer
 -- ============================================================================
 -- utils & misc functions
 -- ============================================================================
+
+local function InitDB(dst, src, add, reset, norecurse)
+	if type(dst)~="table" then
+		dst = {}
+	elseif reset then
+		wipe(dst)
+	end
+	for k,v in pairs(src) do
+		if type(v)=="table" and not norecurse then
+			dst[k] = InitDB(dst[k] or {}, v, add)
+		elseif add then
+			dst[k] = (dst[k] or 0) + v
+		elseif dst[k]==nil then
+			dst[k] = v
+		end
+	end
+	return dst
+end
+
+local function GetDailyDB(datetime, create)
+	local key  = date("%Y/%m/%d", datetime)
+	local data = config.daily[key]
+	if not data and create then
+		data = InitDB({}, DEFDATA)
+		config.daily[key] = data
+	end
+	return data
+end
 
 local ZoneTitle
 do
@@ -195,6 +244,7 @@ end
 
 -- dialogs
 do
+	local DUMMY = function() end
 	StaticPopupDialogs["KIWIFARM_DIALOG"] = { timeout = 0, whileDead = 1, hideOnEscape = 1, button1 = ACCEPT, button2 = CANCEL }
 
 	function addon:ShowDialog(message, textDefault, funcAccept, funcCancel, textAccept, textCancel)
@@ -411,12 +461,12 @@ do
 			local timeLast  = resets[#resets]
 			local timeLock  = #resets>0 and resets[1]+3600 or nil
 			local remain    = RESET_MAX-#resets
-			local sReset = (timeLast and curtime-timeLast) or 0 -- (config.lockspent and curtime-config.lockspent) or 0
+			local sReset = (timeLast and curtime-timeLast) or 0 -- (config.lockSpent and curtime-config.lockSpent) or 0
 			local sUnlock = timeLock and timeLock-curtime or 0
 			--
 			data[#data+1] = (remain==RESET_MAX and '|cFF00ff00') or (remain>0 and '|cFFff8000') or '|cFFff0000'
 			data[#data+1] = #resets
-			data[#data+1] = config.lockspent and '|cFFff8000' or '|cFF00ff00'
+			data[#data+1] = config.lockSpent and '|cFFff8000' or '|cFF00ff00'
 			data[#data+1] = floor(sReset/60)
 			data[#data+1] = sReset%60
 			--
@@ -430,26 +480,26 @@ do
 		if not disabled.count then
 			-- mob kills
 			data[#data+1] = combatCurKills or combatPreKills
-			data[#data+1] = config.mobKills
+			data[#data+1] = session.mobKills
 			-- items looted
-			data[#data+1] = config.countItems
+			data[#data+1] = session.countItems
 		end
 		-- gold info
-		data[#data+1] = FmtMoney(config.moneyCash)
-		data[#data+1] = FmtMoney(config.moneyItems)
+		data[#data+1] = FmtMoney(session.moneyCash)
+		data[#data+1] = FmtMoney(session.moneyItems)
 		if not disabled.quality then
 			for i=0,5 do
-				data[#data+1] = config.countByQuality[i] or 0
-				data[#data+1] = FmtMoney(config.moneyByQuality[i] or 0)
+				data[#data+1] = session.countByQuality[i] or 0
+				data[#data+1] = FmtMoney(session.moneyByQuality[i] or 0)
 			end
 		end
-		local total = config.moneyCash+config.moneyItems
+		local total = session.moneyCash+session.moneyItems
 		data[#data+1] = FmtMoney(sSession>0 and floor(total*3600/sSession) or 0)
 		data[#data+1] = FmtMoney(total)
 		-- set text
 		textr:SetFormattedText( text_mask, unpack(data) )
 		-- update timer status
-		local stopped = #resets==0 and not config.lockspent and not config.sessionStart
+		local stopped = #resets==0 and not config.lockSpent and not config.sessionStart
 		if stopped ~= not timer:IsPlaying() then
 			if stopped then
 				timer:Stop()
@@ -462,23 +512,16 @@ end
 
 -- adjust the money stats of a looted item whose price was changed by the user.
 local function AdjustLootedItemMoneyStats(itemLink)
-	local lootedItem = config.lootedItems[itemLink]
+	local lootedItem = session.lootedItems[itemLink]
 	if lootedItem then
 		local newPrice, quality = GetItemPrice(itemLink)
 		if newPrice then
 			local newMoney = newPrice * lootedItem.quantity
 			local moneyDiff = newMoney - lootedItem.money
 			if moneyDiff ~= 0 then
-				-- item
 				lootedItem.money = newMoney
-				-- total
-				config.moneyItems = math.max(0, config.moneyItems + moneyDiff)
-				-- quality
-				config.moneyByQuality[quality] = math.max(0, config.moneyByQuality[quality] + moneyDiff)
-				-- daily
-				local dailyKey = date("%Y/%m/%d")
-				config.moneyDaily[dailyKey] = math.max(0, config.moneyDaily[dailyKey] + moneyDiff)
-				--
+				session.moneyItems = math.max(0, session.moneyItems + moneyDiff)
+				session.moneyByQuality[quality] = math.max(0, session.moneyByQuality[quality] + moneyDiff)
 				RefreshText()
 			end
 		end
@@ -489,7 +532,7 @@ end
 local function AddReset()
 	local curtime = time()
 	if curtime-(resets[#resets] or 0)>3 then -- ignore reset of additional instances
-		config.lockspent = nil
+		config.lockSpent = nil
 		tinsert( resets, curtime )
 		if addon:IsVisible() then
 			RefreshText()
@@ -500,11 +543,7 @@ end
 -- session start
 local function SessionStart(force)
 	if not config.sessionStart or force==true then
-		config.sessionStart = config.sessionStart or time()
-		config.moneyCash  = config.moneyCash or 0
-		config.moneyItems = config.moneyItems or 0
-		config.countItems = config.countItems or 0
-		config.mobKills   = config.mobKills or 0
+		config.sessionStart = time()
 		addon:RegisterEvent("PLAYER_REGEN_DISABLED")
 		addon:RegisterEvent("PLAYER_REGEN_ENABLED")
 		addon:RegisterEvent("CHAT_MSG_LOOT")
@@ -530,17 +569,14 @@ end
 
 -- session clear
 local function SessionReset()
-	config.sessionStart = config.sessionStart and time() or nil
+	local curtime = time()
+	config.sessionStart = config.sessionStart and curtime or nil
 	config.sessionDuration = nil
-	config.mobKills   = 0
-	config.moneyCash  = 0
-	config.moneyItems = 0
-	config.countItems = 0
-	wipe(config.lootedItems)
-	wipe(config.moneyByQuality)
-	wipe(config.countByQuality)
+	InitDB(config.total, session, true)
+	InitDB(GetDailyDB(curtime, true), session, true)
+	InitDB(session, DEFDATA, false, true)
+	timeLootedItems = curtime
 	RefreshText()
-	timeLootedItems = time()
 end
 
 -- restore main frame position
@@ -573,7 +609,7 @@ local function LayoutFrame()
 	textl:SetPoint('TOPLEFT', MARGIN, -MARGIN)
 	textl:SetJustifyH('LEFT')
 	textl:SetJustifyV('TOP')
-	textl:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
+	textl:SetFont(config.fontName or FONTS.Arial or STANDARD_TEXT_FONT, config.fontSize or 14, 'OUTLINE')
 	PrepareText()
 	-- text right
 	textr:ClearAllPoints()
@@ -581,7 +617,7 @@ local function LayoutFrame()
 	textr:SetPoint('TOPLEFT', MARGIN, -MARGIN)
 	textr:SetJustifyH('RIGHT')
 	textr:SetJustifyV('TOP')
-	textr:SetFont(config.fontname or FONTS.Arial or STANDARD_TEXT_FONT, config.fontsize or 14, 'OUTLINE')
+	textr:SetFont(config.fontName or FONTS.Arial or STANDARD_TEXT_FONT, config.fontSize or 14, 'OUTLINE')
 	RefreshText()
 	-- delayed frame sizing, because textl:GetHeight() returns incorrect height on first login for some fonts.
 	addon:SetScript("OnUpdate", UpdateFrameSize)
@@ -628,23 +664,20 @@ function addon:CHAT_MSG_LOOT(event,msg)
 			if price then
 				local money = price*quantity
 				-- register item looted
-				local lootedItem = config.lootedItems[itemLink]
+				local lootedItem = session.lootedItems[itemLink]
 				if not lootedItem then
 					lootedItem = { money = 0, quantity = 0 }
-					config.lootedItems[itemLink] = lootedItem
+					session.lootedItems[itemLink] = lootedItem
 					timeLootedItems = time()
 				end
 				lootedItem.quantity = lootedItem.quantity + quantity
 				lootedItem.money    = lootedItem.money    + money
 				-- register item money earned
-				config.moneyItems = config.moneyItems + money
-				config.moneyByQuality[rarity] = (config.moneyByQuality[rarity] or 0) + money
-				-- register daily money earned
-				local dailyKey = date("%Y/%m/%d")
-				config.moneyDaily[dailyKey] = (config.moneyDaily[dailyKey] or 0) + money
+				session.moneyItems = session.moneyItems + money
+				session.moneyByQuality[rarity] = (session.moneyByQuality[rarity] or 0) + money
 				-- register counts
-				config.countItems = config.countItems + quantity
-				config.countByQuality[rarity] = (config.countByQuality[rarity] or 0) + quantity
+				session.countItems = session.countItems + quantity
+				session.countByQuality[rarity] = (session.countByQuality[rarity] or 0) + quantity
 				-- notifications
 				if notify[rarity] then Notify(rarity,   itemLink, quantity, money) end
 				if notify.price   then Notify('price',  itemLink, quantity, money) end
@@ -663,11 +696,7 @@ do
 			wipe(digits)
 			gsub(msg,"%d+",func)
 			local money = digits[#digits] + (digits[#digits-1] or 0)*100 + (digits[#digits-2] or 0)*10000
-			-- register cash money
-			config.moneyCash = config.moneyCash + money
-			-- register daily money
-			local dailyKey = date("%Y/%m/%d")
-			config.moneyDaily[dailyKey] = (config.moneyDaily[dailyKey] or 0) + money
+			session.moneyCash = session.moneyCash + money
 			-- notify
 			if notify.money then
 				Notify('money', nil, nil, money); NotifyEnd()
@@ -733,7 +762,7 @@ do
 	hooksecurefunc("CancelLogout", function() isLogout=nil end)
 	function addon:PLAYER_LOGOUT()
 		if isLogout then
-			if config.lockspent and not IsInInstance() then
+			if config.lockSpent and not IsInInstance() then
 				AddReset()
 			end
 			SessionStop()
@@ -747,11 +776,11 @@ end
 function addon:COMBAT_LOG_EVENT_UNFILTERED()
 	local _, eventType,_,_,_,_,_,dstGUID,_,dstFlags = CombatLogGetCurrentEventInfo()
 	if eventType == 'UNIT_DIED' and band(dstFlags,COMBATLOG_OBJECT_CONTROL_NPC)~=0 then
-		if inInstance and not config.lockspent then
-			config.lockspent = time()
+		if inInstance and not config.lockSpent then
+			config.lockSpent = time()
 			timer:Play()
 		end
-		config.mobKills = config.mobKills + 1
+		session.mobKills = session.mobKills + 1
 		combatCurKills = (combatCurKills or 0) + 1
 	end
 end
@@ -798,18 +827,13 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	-- database setup
 	local serverKey = GetRealmName()
 	local root = KiwiFarmDB
-	if not root then
-		root = {}; KiwiFarmDB = root
-	end
+	if not root then root = {}; KiwiFarmDB = root; end
 	config = root[serverKey]
-	if not config then
-		config = { resets = {} }; root[serverKey] = config
-	end
-	for k,v in pairs(DEFAULTS) do -- apply missing default values
-		if config[k]==nil then
-			config[k] = v
-		end
-	end
+	if not config then config = { resets = {} }; root[serverKey] = config; end
+	InitDB(config, DEFAULT, nil, nil, true)
+	InitDB(config.session, DEFDATA)
+	InitDB(config.total, DEFDATA)
+	session  = config.session
 	resets   = config.resets
 	notify   = config.notify
 	disabled = config.disabled
@@ -1002,7 +1026,7 @@ do
 		LayoutFrame()
 	end
 	local function SetFontSize(info)
-		config.fontsize = info.value~=0 and math.max( (config.fontsize or 14) + info.value, 5) or 14
+		config.fontSize = info.value~=0 and math.max( (config.fontSize or 14) + info.value, 5) or 14
 		LayoutFrame()
 	end
 	local function AnchorChecked(info)
@@ -1025,7 +1049,7 @@ do
 	end
 	local function SetDisplay(info)
 		disabled[info.value] = (not disabled[info.value]) or nil
-		PrepareText(); LayoutFrame(); RefreshText()
+		LayoutFrame()
 	end
 
 	-- submenu: quality sources
@@ -1129,21 +1153,26 @@ do
 	local menuLootedItems
 	do
 		local function getText(info)
-			local data = config.lootedItems[info.value]
+			local data = session.lootedItems[info.value]
 			return data and format("%sx%d %s", info.value, data.quantity, FmtMoneyShort(data.money)) or info.value
 		end
-		menuLootedItems = { init = function(menu)
-			if timeLootedItems>(menu.time or -1) then
+		menuLootedItems = { init = function(menu, level)
+			local value = getMenuValue(level)
+			if timeLootedItems>(menu.time or -1) or value~=menu.value then
 				wipeMenu(menu)
-				for itemLink, data in pairs(config.lootedItems) do
-					local name = strmatch(itemLink, '%|h%[(.+)%]%|h')
-					tinsert( menu, { text = getText, value = itemLink, arg1 = name, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
+				for itemLink, data in pairs(session.lootedItems) do
+					if value<0 or value==select(3,GetItemInfo(itemLink)) then
+						local name = strmatch(itemLink, '%|h%[(.+)%]%|h')
+						tinsert( menu, { text = getText, value = itemLink, arg1 = name, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
+					end
 				end
-				if not menu[1] then
+				if menu[1] then
+					splitMenu(menu, 'arg1')
+				else
 					menu[1] = { text = "None", notCheckable = true }
 				end
-				splitMenu(menu, 'arg1')
-				menu.time = timeLootedItems
+				menu.time  = timeLootedItems
+				menu.value = value
 			end
 		end }
 	end
@@ -1189,8 +1218,9 @@ do
 	-- submenu: gold earned by item quality
 	local menuGoldQuality = { init = function(menu)
 		for i=1,5 do
-			menu[i] = menu[i] or { notCheckable = true }
-			menu[i].text = format( "%s: %s (%d)", FmtQuality(i-1), FmtMoney(config.moneyByQuality[i-1] or 0), config.countByQuality[i-1] or 0)
+			local quality = i-1
+			menu[i] = menu[i] or { notCheckable = true, hasArrow = true, value = quality, menuList = menuLootedItems }
+			menu[i].text = format( "%s: %s (%d)", FmtQuality(quality), FmtMoney(session.moneyByQuality[quality] or 0), session.countByQuality[quality] or 0)
 		end
 	end }
 
@@ -1200,7 +1230,8 @@ do
 		for i=1,7 do
 			menu[i] = menu[i] or { notCheckable = true }
 			key, pre = date("%Y/%m/%d", tim), pre and date("%m/%d", tim) or 'Today'
-			money = config.moneyDaily[key] or 0
+			local data = config.daily[key]
+			money = data and data.moneyCash+data.moneyItems or 0
 			menu[i].text = format('%s: %s', pre, money>0 and FmtMoney(money) or '-' )
 			tim = tim - 86400
 		end
@@ -1210,12 +1241,12 @@ do
 	local menuFonts
 	do
 		local function set(info)
-			config.fontname = info.value
+			config.fontName = info.value
 			LayoutFrame()
 			refreshMenu()
 		end
 		local function checked(info)
-			return info.value == (config.fontname or FONTS.Arial)
+			return info.value == (config.fontName or FONTS.Arial)
 		end
 		menuFonts  = { init = function(menu)
 			local media = LibStub("LibSharedMedia-3.0", true)
@@ -1319,9 +1350,10 @@ do
 		{ text = 'Session Clear',      notCheckable = true, func = SessionReset },
 		{ text = 'Reset Instances',    notCheckable = true, func = ResetInstances },
 		{ text = 'Statistics',         notCheckable = true, isTitle = true },
-		{ text = 'Looted Items',       notCheckable = true, hasArrow = true, menuList = menuLootedItems },
+		{ text = 'Gold by Item',       notCheckable = true, hasArrow = true, value = -1, menuList = menuLootedItems },
 		{ text = 'Gold by Qualiy',     notCheckable = true, hasArrow = true, menuList = menuGoldQuality },
-		{ text = 'Gold by Day',        notCheckable = true, hasArrow = true, menuList = menuGoldDaily },
+		{ text = 'Gold by Day',        notCheckable = true, hasArrow = true, value = 'daily', menuList = menuGoldDaily },
+		{ text = 'Gold Total',         notCheckable = true, hasArrow = true, value = 'total', menuList = menuGoldDaily },
 		{ text = 'Resets',             notCheckable = true, hasArrow = true, menuList = menuResets },
 		{ text = 'Settings',           notCheckable = true, isTitle = true },
 		{ text = 'Prices of Items', notCheckable = true, hasArrow = true, menuList = {
@@ -1332,7 +1364,10 @@ do
 			{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 			{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 			{ text = 'Specific Items', notCheckable= true, hasArrow = true, value = 'specific' ,menuList = menuPriceItems },
-			{ text = 'Ignore enchanting mats', isNotRadio = true, keepShownOnClick = 1, checked = function() return config.ignoreEnchantingMats; end, func = function() config.ignoreEnchantingMats = not config.ignoreEnchantingMats or nil; end },
+			{ text = 'Ignore enchanting mats', isNotRadio = true, keepShownOnClick = 1,
+				checked = function() return config.ignoreEnchantingMats; end,
+				func = function() config.ignoreEnchantingMats = not config.ignoreEnchantingMats or nil; end
+			},
 		} },
 		{ text = 'Notifications', notCheckable = true, hasArrow = true, menuList = {
 			{ text = FmtQuality(0),  value = 0,       notCheckable = true, hasArrow = true, menuList = menuNotify },
@@ -1378,7 +1413,10 @@ do
 				{ text = 'Decrease(-)',  value = -1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 				{ text = 'Default (14)', value =  0,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 			} },
-			{ text ='Background color ', notCheckable = true, hasColorSwatch = true, hasOpacity = true, get = function() return unpack(config.backColor) end, set = function(info, ...) config.backColor = {...}; SetBackground(); end },
+			{ text ='Background color ', notCheckable = true, hasColorSwatch = true, hasOpacity = true,
+				get = function() return unpack(config.backColor) end,
+				set = function(info, ...) config.backColor = {...}; SetBackground(); end,
+			},
 			{ text = 'Hide Window', notCheckable = true, func = function() addon:Hide() end },
 		} },
 	}
