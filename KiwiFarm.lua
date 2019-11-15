@@ -1010,6 +1010,8 @@ do
 	end
 
 	-- here starts the definition of the KiwiFrame menu, misc functions
+	local stats -- reference to table stats data ( = config.session | config.total | config.daily[key] )
+
 	local function InitPriceSources(menu)
 		for i=#menu,1,-1 do
 			if (menu[i].arg1 =='Atr' and not Atr_GetAuctionPrice) or (menu[i].arg1 =='TSM' and not TSMAPI_FOUR) then
@@ -1051,6 +1053,44 @@ do
 		disabled[info.value] = (not disabled[info.value]) or nil
 		LayoutFrame()
 	end
+
+	-- submenu: zones
+	local menuZones
+	do
+		local function ZoneAdd()
+			local zone = GetZoneText()
+			config.zones = config.zones or {}
+			config.zones[zone] = true
+			addon:ZONE_CHANGED_NEW_AREA()
+			wipeMenu(menuZones)
+		end
+		local function ZoneDel(info)
+			config.zones[info.value] = nil
+			if not next(config.zones) then config.zones = nil end
+			addon:ZONE_CHANGED_NEW_AREA()
+			wipeMenu(menuZones)
+		end
+		menuZones = { init = function(menu)
+			if not menu[1] then
+				for zone in pairs(config.zones or {}) do
+					menu[#menu+1] = { text = '(-)'..zone, value = zone, notCheckable = true, func = ZoneDel }
+				end
+				menu[#menu+1] = { text = '(+)Add Current Zone', notCheckable = true, func = ZoneAdd }
+			end
+		end	}
+	end
+
+	-- submenu: resets
+	local menuResets = { init = function(menu)
+		local item = { text = 'None', notCheckable = true }
+		for i=1,5 do
+			if resets[i] then
+				item = menu[i] or { notCheckable = true }
+				item.text = date("%H:%M:%S",resets[i])
+			end
+			menu[i], item = item, nil
+		end
+	end	}
 
 	-- submenu: quality sources
 	local menuQualitySources
@@ -1153,15 +1193,15 @@ do
 	local menuLootedItems
 	do
 		local function getText(info)
-			local data = session.lootedItems[info.value]
+			local data = stats.lootedItems[info.value]
 			return data and format("%sx%d %s", info.value, data.quantity, FmtMoneyShort(data.money)) or info.value
 		end
 		menuLootedItems = { init = function(menu, level)
 			local value = getMenuValue(level)
 			if timeLootedItems>(menu.time or -1) or value~=menu.value then
 				wipeMenu(menu)
-				for itemLink, data in pairs(session.lootedItems) do
-					if value<0 or value==select(3,GetItemInfo(itemLink)) then
+				for itemLink, data in pairs(stats.lootedItems) do
+					if type(value)~='number' or value==select(3,GetItemInfo(itemLink)) then
 						local name = strmatch(itemLink, '%|h%[(.+)%]%|h')
 						tinsert( menu, { text = getText, value = itemLink, arg1 = name, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
 					end
@@ -1176,66 +1216,6 @@ do
 			end
 		end }
 	end
-
-	-- submenu: zones
-	local menuZones
-	do
-		local function ZoneAdd()
-			local zone = GetZoneText()
-			config.zones = config.zones or {}
-			config.zones[zone] = true
-			addon:ZONE_CHANGED_NEW_AREA()
-			wipeMenu(menuZones)
-		end
-		local function ZoneDel(info)
-			config.zones[info.value] = nil
-			if not next(config.zones) then config.zones = nil end
-			addon:ZONE_CHANGED_NEW_AREA()
-			wipeMenu(menuZones)
-		end
-		menuZones = { init = function(menu)
-			if not menu[1] then
-				for zone in pairs(config.zones or {}) do
-					menu[#menu+1] = { text = '(-)'..zone, value = zone, notCheckable = true, func = ZoneDel }
-				end
-				menu[#menu+1] = { text = '(+)Add Current Zone', notCheckable = true, func = ZoneAdd }
-			end
-		end	}
-	end
-
-	-- submenu: resets
-	local menuResets = { init = function(menu)
-		local item = { text = 'None', notCheckable = true }
-		for i=1,5 do
-			if resets[i] then
-				item = menu[i] or { notCheckable = true }
-				item.text = date("%H:%M:%S",resets[i])
-			end
-			menu[i], item = item, nil
-		end
-	end	}
-
-	-- submenu: gold earned by item quality
-	local menuGoldQuality = { init = function(menu)
-		for i=1,5 do
-			local quality = i-1
-			menu[i] = menu[i] or { notCheckable = true, hasArrow = true, value = quality, menuList = menuLootedItems }
-			menu[i].text = format( "%s: %s (%d)", FmtQuality(quality), FmtMoney(session.moneyByQuality[quality] or 0), session.countByQuality[quality] or 0)
-		end
-	end }
-
-	-- submenu: gold earned by day
-	local menuGoldDaily = {	init = function(menu)
-		local tim, pre, key, money = time()
-		for i=1,7 do
-			menu[i] = menu[i] or { notCheckable = true }
-			key, pre = date("%Y/%m/%d", tim), pre and date("%m/%d", tim) or 'Today'
-			local data = config.daily[key]
-			money = data and data.moneyCash+data.moneyItems or 0
-			menu[i].text = format('%s: %s', pre, money>0 and FmtMoney(money) or '-' )
-			tim = tim - 86400
-		end
-	end	}
 
 	-- submenu: fonts
 	local menuFonts
@@ -1342,6 +1322,50 @@ do
 		}
 	end
 
+	-- submenu: gold earned by item quality
+	local menuGoldQuality = { init = function(menu)
+		for i=1,5 do
+			local quality = i-1
+			menu[i] = menu[i] or { notCheckable = true, hasArrow = true, value = quality, menuList = menuLootedItems }
+			menu[i].text = format( "%s: %s (%d)", FmtQuality(quality), FmtMoney(stats.moneyByQuality[quality] or 0), stats.countByQuality[quality] or 0)
+		end
+	end }
+
+	-- submenu: total gold earned
+	local menuGoldTotal = {
+		{ text = function() return FmtMoney(stats.moneyCash+stats.moneyItems) end, notCheckable = true },
+	}
+
+	-- submenu: stats
+	local menuStats = {
+		{ text = 'Gold Total',      notCheckable = true, hasArrow = true, menuList = menuGoldTotal },
+		{ text = 'Gold by Quality', notCheckable = true, hasArrow = true, menuList = menuGoldQuality },
+		{ text = 'Gold by Item',    notCheckable = true, hasArrow = true, menuList = menuLootedItems },
+		init = function(menu,level)
+			local field = getMenuValue(level)
+			stats = config[field] or field
+			timeLootedItems = time()
+		end,
+	}
+
+	-- submenu: daily stats
+	local menuDaily = {	init = function(menu)
+		local tim, pre, key = time()
+		for i=1,7 do
+			key, pre = date("%Y/%m/%d", tim), pre and date("%m/%d", tim) or 'Today'
+			local data = config.daily[key]
+			if data then
+				local money = data and data.moneyCash+data.moneyItems or 0
+				menu[i] = menu[i] or { notCheckable = true, hasArrow = true, menuList = menuStats }
+				menu[i].text = format('%s: %s', pre, FmtMoney(money) )
+				menu[i].value = data
+			else
+				menu[i] = nil
+			end
+			tim = tim - 86400
+		end
+	end	}
+
 	-- menu: main
 	local menuMain = {
 		{ text = 'Kiwi Farm [/kfarm]', notCheckable = true, isTitle = true },
@@ -1350,10 +1374,9 @@ do
 		{ text = 'Session Clear',      notCheckable = true, func = SessionReset },
 		{ text = 'Reset Instances',    notCheckable = true, func = ResetInstances },
 		{ text = 'Statistics',         notCheckable = true, isTitle = true },
-		{ text = 'Gold by Item',       notCheckable = true, hasArrow = true, value = -1, menuList = menuLootedItems },
-		{ text = 'Gold by Qualiy',     notCheckable = true, hasArrow = true, menuList = menuGoldQuality },
-		{ text = 'Gold by Day',        notCheckable = true, hasArrow = true, value = 'daily', menuList = menuGoldDaily },
-		{ text = 'Gold Total',         notCheckable = true, hasArrow = true, value = 'total', menuList = menuGoldDaily },
+		{ text = 'Session',            notCheckable = true, hasArrow = true, value = 'session', menuList = menuStats },
+		{ text = 'Daily',              notCheckable = true, hasArrow = true, menuList = menuDaily },
+		{ text = 'Total',              notCheckable = true, hasArrow = true, value = 'total',   menuList = menuStats },
 		{ text = 'Resets',             notCheckable = true, hasArrow = true, menuList = menuResets },
 		{ text = 'Settings',           notCheckable = true, isTitle = true },
 		{ text = 'Prices of Items', notCheckable = true, hasArrow = true, menuList = {
@@ -1363,7 +1386,7 @@ do
 			{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 			{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 			{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
-			{ text = 'Specific Items', notCheckable= true, hasArrow = true, value = 'specific' ,menuList = menuPriceItems },
+			{ text = 'Specific Items', notCheckable= true, hasArrow = true, value = 'specific', menuList = menuPriceItems },
 			{ text = 'Ignore enchanting mats', isNotRadio = true, keepShownOnClick = 1,
 				checked = function() return config.ignoreEnchantingMats; end,
 				func = function() config.ignoreEnchantingMats = not config.ignoreEnchantingMats or nil; end
