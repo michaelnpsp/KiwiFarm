@@ -62,13 +62,11 @@ local DEFDATA = {
 
 -- database defaults
 local DEFAULT = {
-	-- session ctrl
-	sessionStart =nil,
-	sessionDuration = nil,
 	-- data/stats
 	session = {},
 	total   = {},
 	daily   = {},
+	zone    = {},
 	-- instance locks&resets
 	resets 	= {},
 	lockSpent = nil,
@@ -157,10 +155,20 @@ local function InitDB(dst, src, add, reset, norecurse)
 	return dst
 end
 
-local function GetDailyDB(datetime, create)
+local function GetZoneDB(key)
+	key = key or GetZoneText()
+	local data = config.zone[key]
+	if not data then
+		data = InitDB({}, DEFDATA)
+		config.zone[key] = data
+	end
+	return data
+end
+
+local function GetDailyDB(datetime)
 	local key  = date("%Y/%m/%d", datetime)
 	local data = config.daily[key]
-	if not data and create then
+	if not data then
 		data = InitDB({}, DEFDATA)
 		config.daily[key] = data
 	end
@@ -201,6 +209,19 @@ end
 
 local function FmtQuality(i)
 	return format( "|c%s%s|r", select(4,GetItemQualityColor(i)), _G['ITEM_QUALITY'..i..'_DESC'] )
+end
+
+local function FmtDuration(seconds)
+	local m,s = floor(seconds/60), seconds%60
+	local h,m = floor(m/60), m%60
+	local d,h = floor(h/24), h%24
+	if d>0 then
+		return format("%dd %dh %dm %ds",d,h,m,s)
+	elseif h>0 then
+		return format("%dh %dm %ds",h,m,s)
+	else
+		return format("%dm %ds",m,s)
+	end
 end
 
 local function FmtMoney(money)
@@ -449,10 +470,10 @@ do
 		-- zone text
 		data[#data+1] = ZoneTitle[ GetZoneText() ]
 		-- session duration
-		local sSession = curtime - (config.sessionStart or curtime) + (config.sessionDuration or 0)
+		local sSession = curtime - (session.startTime or curtime) + (session.duration or 0)
 		local m0, s0 = floor(sSession/60), sSession%60
 		local h0, m0 = floor(m0/60), m0%60
-		data[#data+1] = config.sessionStart and '|cFF00ff00' or '|cFFff0000'
+		data[#data+1] = session.startTime and '|cFF00ff00' or '|cFFff0000'
 		data[#data+1] = h0
 		data[#data+1] = m0
 		data[#data+1] = s0
@@ -499,7 +520,7 @@ do
 		-- set text
 		textr:SetFormattedText( text_mask, unpack(data) )
 		-- update timer status
-		local stopped = #resets==0 and not config.lockSpent and not config.sessionStart
+		local stopped = #resets==0 and not config.lockSpent and not session.startTime
 		if stopped ~= not timer:IsPlaying() then
 			if stopped then
 				timer:Stop()
@@ -542,8 +563,8 @@ end
 
 -- session start
 local function SessionStart(force)
-	if not config.sessionStart or force==true then
-		config.sessionStart = time()
+	if not session.startTime or force==true then
+		session.startTime = time()
 		addon:RegisterEvent("PLAYER_REGEN_DISABLED")
 		addon:RegisterEvent("PLAYER_REGEN_ENABLED")
 		addon:RegisterEvent("CHAT_MSG_LOOT")
@@ -555,10 +576,10 @@ end
 
 -- session stop
 local function SessionStop()
-	if config.sessionStart then
-		local curtime = time()
-		config.sessionDuration = (config.sessionDuration or 0) + (curtime - (config.sessionStart or curtime))
-		config.sessionStart = nil
+	if session.startTime then
+		local curTime = time()
+		session.duration = (session.duration or 0) + (curTime - (session.startTime or curTime))
+		session.startTime = nil
 		addon:UnregisterEvent("PLAYER_REGEN_DISABLED")
 		addon:UnregisterEvent("PLAYER_REGEN_ENABLED")
 		addon:UnregisterEvent("CHAT_MSG_LOOT")
@@ -568,15 +589,21 @@ local function SessionStop()
 end
 
 -- session clear
-local function SessionReset()
-	local curtime = time()
-	config.sessionStart = config.sessionStart and curtime or nil
-	config.sessionDuration = nil
-	InitDB(config.total, session, true)
-	InitDB(GetDailyDB(curtime, true), session, true)
-	InitDB(session, DEFDATA, false, true)
-	timeLootedItems = curtime
-	RefreshText()
+local function SessionFinish()
+	if session.startTime or session.duration then
+		local curTime     = time()
+		local zoneName    = session.zoneName or GetZoneText()
+		session.duration  = (session.duration or 0) + (curTime - (session.startTime or curTime))
+		session.startTime = nil
+		session.zoneName  = nil
+		InitDB(config.total, session, true)
+		InitDB(GetDailyDB(curTime), session, true)
+		InitDB(GetZoneDB(zoneName), session, true)
+		InitDB(session, DEFDATA, false, true)
+		session.duration = nil
+		timeLootedItems = curTime
+		RefreshText()
+	end
 end
 
 -- restore main frame position
@@ -653,7 +680,7 @@ end
 local PATTERN_LOOTS = LOOT_ITEM_SELF:gsub("%%s", "(.+)")
 local PATTERN_LOOTM = LOOT_ITEM_SELF_MULTIPLE:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)")
 function addon:CHAT_MSG_LOOT(event,msg)
-	if config.sessionStart then
+	if session.startTime then
 		local itemLink, quantity = strmatch(msg, PATTERN_LOOTM)
 		if not itemLink then
 			quantity = 1
@@ -678,6 +705,10 @@ function addon:CHAT_MSG_LOOT(event,msg)
 				-- register counts
 				session.countItems = session.countItems + quantity
 				session.countByQuality[rarity] = (session.countByQuality[rarity] or 0) + quantity
+				-- register zone if necessary
+				if not session.zoneName then
+					session.zoneName = GetZoneText()
+				end
 				-- notifications
 				if notify[rarity] then Notify(rarity,   itemLink, quantity, money) end
 				if notify.price   then Notify('price',  itemLink, quantity, money) end
@@ -692,11 +723,15 @@ do
 	local digits = {}
 	local func = function(n) digits[#digits+1]=n end
 	function addon:CHAT_MSG_MONEY(event,msg)
-		if config.sessionStart then
+		if session.startTime then
 			wipe(digits)
 			gsub(msg,"%d+",func)
 			local money = digits[#digits] + (digits[#digits-1] or 0)*100 + (digits[#digits-2] or 0)*10000
 			session.moneyCash = session.moneyCash + money
+			-- register zone if necessary
+			if not session.zoneName then
+				session.zoneName = GetZoneText()
+			end
 			-- notify
 			if notify.money then
 				Notify('money', nil, nil, money); NotifyEnd()
@@ -729,8 +764,8 @@ do
 				if inInstance and #resets>=RESET_MAX then -- locked but inside instance, means locked expired before estimated unlock time
 					table.remove(resets,1)
 				end
-				if config.zones then
-					if config.zones[zone] then
+				if config.farmZones then
+					if config.farmZones[zone] then
 						if inInstance and lastZoneKey then
 							SessionStart()
 						else
@@ -866,11 +901,11 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	-- frame size & appearance
 	LayoutFrame()
 	-- session
-	if config.sessionStart then
+	if session.startTime then
 		SessionStart(true)
 	end
 	-- mainframe initial visibility
-	addon:SetShown( config.visible and (not config.zones or config.reloadUI) )
+	addon:SetShown( config.visible and (not config.farmZones or config.reloadUI) )
 end)
 
 -- ============================================================================
@@ -934,7 +969,13 @@ do
 					if type(item.text)=='function' then -- save function text in another field for later use
 						item.textf = item.text
 					end
-					if item.textf then -- text support for functions instead of only strings
+					if type(item.disabled)=='function' then
+						item.disabledf = item.disabled
+					end
+					if item.disabledf then -- support for functions instead of only booleans
+						item.disabled = item.disabledf(item, level, frame)
+					end
+					if item.textf then -- support for functions instead of only strings
 						item.text = item.textf(item, level, frame)
 					end
 					if item.hasColorSwatch then -- simplified color management, only definition of get&set functions required to retrieve&save the color
@@ -1054,25 +1095,25 @@ do
 		LayoutFrame()
 	end
 
-	-- submenu: zones
+	-- submenu: farmZones
 	local menuZones
 	do
 		local function ZoneAdd()
 			local zone = GetZoneText()
-			config.zones = config.zones or {}
-			config.zones[zone] = true
+			config.farmZones = config.farmZones or {}
+			config.farmZones[zone] = true
 			addon:ZONE_CHANGED_NEW_AREA()
 			wipeMenu(menuZones)
 		end
 		local function ZoneDel(info)
-			config.zones[info.value] = nil
-			if not next(config.zones) then config.zones = nil end
+			config.farmZones[info.value] = nil
+			if not next(config.farmZones) then config.farmZones = nil end
 			addon:ZONE_CHANGED_NEW_AREA()
 			wipeMenu(menuZones)
 		end
 		menuZones = { init = function(menu)
 			if not menu[1] then
-				for zone in pairs(config.zones or {}) do
+				for zone in pairs(config.farmZones or {}) do
 					menu[#menu+1] = { text = '(-)'..zone, value = zone, notCheckable = true, func = ZoneDel }
 				end
 				menu[#menu+1] = { text = '(+)Add Current Zone', notCheckable = true, func = ZoneAdd }
@@ -1331,20 +1372,28 @@ do
 		end
 	end }
 
-	-- submenu: total gold earned
-	local menuGoldTotal = {
-		{ text = function() return FmtMoney(stats.moneyCash+stats.moneyItems) end, notCheckable = true },
-	}
-
 	-- submenu: stats
 	local menuStats = {
-		{ text = 'Gold Total',      notCheckable = true, hasArrow = true, menuList = menuGoldTotal },
+		{ notCheckable = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
 		{ text = 'Gold by Quality', notCheckable = true, hasArrow = true, menuList = menuGoldQuality },
 		{ text = 'Gold by Item',    notCheckable = true, hasArrow = true, menuList = menuLootedItems },
 		init = function(menu,level)
+			local curTime = time()
 			local field = getMenuValue(level)
 			stats = config[field] or field
-			timeLootedItems = time()
+			local money = stats.moneyCash+stats.moneyItems
+			local mhour = stats.duration and stats.duration>0 and floor(money*3600/stats.duration) or 0
+			local ftime = (stats.duration or 0) + curTime - (stats.startTime or curTime)
+			menu[1].text = format("Farm Time: %s", FmtDuration(ftime))
+			menu[2].text = format("Gold total: %s", FmtMoney(money))
+			menu[3].text = format("Gold/hour: %s", FmtMoney(mhour))
+			menu[4].text = format("Items looted: %d", stats.countItems)
+			menu[5].text = format("Mobs killed: %d", stats.mobKills)
+			timeLootedItems = curTime
 		end,
 	}
 
@@ -1366,16 +1415,36 @@ do
 		end
 	end	}
 
+	-- submenu: zone stats
+	local menuZone = { init = function(menu)
+		local i = 1
+		if next(config.zone) then
+			for zoneName, data in pairs(config.zone) do
+				menu[i] = menu[i] or { notCheckable = true, hasArrow = true, menuList = menuStats }
+				menu[i].text = zoneName
+				menu[i].value = data
+				i = i + 1
+			end
+		else
+			i = 2
+			menu[1] = menu[1] or { notCheckable = true }
+			menu[1].text = 'None'
+			menu[1].hasArrow = nil
+		end
+		while #menu>=i do menu[#menu] = nil; end
+	end	}
+
 	-- menu: main
 	local menuMain = {
 		{ text = 'Kiwi Farm [/kfarm]', notCheckable = true, isTitle = true },
-		{ text = 'Session Start',      notCheckable = true, func = SessionStart },
-		{ text = 'Session Stop',       notCheckable = true, func = SessionStop  },
-		{ text = 'Session Clear',      notCheckable = true, func = SessionReset },
+		{ text = 'Session Start',      notCheckable = true, disabled = function() return session.startTime end, func = SessionStart },
+		{ text = 'Session Stop',       notCheckable = true, disabled = function() return not session.startTime end, func = SessionStop  },
+		{ text = 'Session Finish',     notCheckable = true, disabled = function() return not (session.startTime or session.duration) end, func = SessionFinish },
 		{ text = 'Reset Instances',    notCheckable = true, func = ResetInstances },
 		{ text = 'Statistics',         notCheckable = true, isTitle = true },
 		{ text = 'Session',            notCheckable = true, hasArrow = true, value = 'session', menuList = menuStats },
 		{ text = 'Daily',              notCheckable = true, hasArrow = true, menuList = menuDaily },
+		{ text = 'Zones',              notCheckable = true, hasArrow = true, menuList = menuZone },
 		{ text = 'Total',              notCheckable = true, hasArrow = true, value = 'total',   menuList = menuStats },
 		{ text = 'Resets',             notCheckable = true, hasArrow = true, menuList = menuResets },
 		{ text = 'Settings',           notCheckable = true, isTitle = true },
