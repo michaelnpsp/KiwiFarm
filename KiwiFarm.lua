@@ -551,14 +551,16 @@ end
 
 -- adjust the money stats of a looted item whose price was changed by the user.
 local function AdjustLootedItemMoneyStats(itemLink)
-	local lootedItem = session.lootedItems[itemLink]
-	if lootedItem then
+	local data = session.lootedItems[itemLink]
+	if data then
+		local money, quantity = data[1], data[2]
 		local newPrice, quality = GetItemPrice(itemLink)
 		if newPrice then
-			local newMoney = newPrice * lootedItem.quantity
-			local moneyDiff = newMoney - lootedItem.money
+			local newMoney = newPrice * quantity
+			local moneyDiff = newMoney - money
 			if moneyDiff ~= 0 then
 				lootedItem.money = newMoney
+				session.lootedItems[itemLink] = { money, quantity }
 				session.moneyItems = math.max(0, session.moneyItems + moneyDiff)
 				session.moneyByQuality[quality] = math.max(0, session.moneyByQuality[quality] + moneyDiff)
 				RefreshText()
@@ -580,9 +582,9 @@ local function AddReset()
 end
 
 -- session start
-local function SessionStart(force)
-	if not session.startTime or force==true then
-		session.startTime = time()
+local function SessionStart(refresh)
+	if not session.startTime or refresh then
+		session.startTime = session.startTime or time()
 		addon:RegisterEvent("PLAYER_REGEN_DISABLED")
 		addon:RegisterEvent("PLAYER_REGEN_ENABLED")
 		addon:RegisterEvent("CHAT_MSG_LOOT")
@@ -711,14 +713,14 @@ function addon:CHAT_MSG_LOOT(event,msg)
 			if price then
 				local money = price*quantity
 				-- register item looted
-				local lootedItem = session.lootedItems[itemLink]
-				if not lootedItem then
-					lootedItem = { money = 0, quantity = 0 }
-					session.lootedItems[itemLink] = lootedItem
+				local data = session.lootedItems[itemLink]
+				if data then
+					data[1] = data[1] + money
+					data[2] = data[2] + quantity
+				else
+					session.lootedItems[itemLink] = { money, quantity }
 					timeLootedItems = time()
 				end
-				lootedItem.quantity = lootedItem.quantity + quantity
-				lootedItem.money    = lootedItem.money    + money
 				-- register item money earned
 				session.moneyItems = session.moneyItems + money
 				session.moneyByQuality[rarity] = (session.moneyByQuality[rarity] or 0) + money
@@ -1267,14 +1269,14 @@ do
 	do
 		local function getText(info)
 			local data = stats.lootedItems and stats.lootedItems[info.value]
-			return data and format("%sx%d %s", info.value, data.quantity, FmtMoneyShort(data.money)) or info.value
+			return data and format("%sx%d %s", info.value, data[2], FmtMoneyShort(data[1])) or info.value
 		end
 		menuLootedItems = { init = function(menu, level)
 			local value = getMenuValue(level)
 			if timeLootedItems>(menu.time or -1) or value~=menu.value then
 				wipeMenu(menu)
 				if stats.lootedItems then
-					for itemLink, data in pairs(stats.lootedItems) do
+					for itemLink in pairs(stats.lootedItems) do
 						if type(value)~='number' or value==select(3,GetItemInfo(itemLink)) then
 							local name = strmatch(itemLink, '%|h%[(.+)%]%|h')
 							tinsert( menu, { text = getText, value = itemLink, arg1 = name, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
@@ -1464,10 +1466,9 @@ do
 		{ notCheckable = true },
 		{ notCheckable = true },
 		{ notCheckable = true },
-		{ text = 'Gold by Quality', notCheckable = true, hasArrow = true, menuList = menuGoldQuality },
-		{ text = 'Gold by Item',    notCheckable = true, hasArrow = true, menuList = menuLootedItems },
-		{ text = 'Killed Mobs',     notCheckable = true, hasArrow = true, menuList = menuKilledMobs  },
-		{ text = 'Maintenance',     notCheckable = true, hasArrow = true, menuList = menuStatsMisc   },
+		{ text = 'Looted Items', notCheckable = true, hasArrow = true, menuList = menuGoldQuality },
+		{ text = 'Killed Mobs',  notCheckable = true, hasArrow = true, menuList = menuKilledMobs  },
+		{ text = 'Maintenance',  notCheckable = true, hasArrow = true, menuList = menuStatsMisc   },
 		init = function(menu,level)
 			local curTime = time()
 			local field = getMenuValue(level)
@@ -1534,15 +1535,15 @@ do
 			collect[info.value][info.arg1] = not collect[info.value][info.arg1] or nil
 		end
 		menuCollect = {
-			{ text = 'Totals',      notCheckable = true, isTitle = true},
-			{ text = 'Detailed Mobs Info',  value = 'total', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
-			{ text = 'Detailed Items Info', value = 'total', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
-			{ text = 'Daily Data',  notCheckable = true, isTitle = true},
-			{ text = 'Detailed Mobs Info',  value = 'daily', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
-			{ text = 'Detailed Items Info', value = 'daily', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
-			{ text = 'Zone Data',   notCheckable = true, isTitle = true},
-			{ text = 'Detailed Mobs Info',  value = 'zone',  arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
-			{ text = 'Detailed Items Info', value = 'zone',  arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Total Stats',      notCheckable = true, isTitle = true},
+			{ text = 'Detailed Mobs Stats',  value = 'total', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Detailed Items Stats', value = 'total', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Daily Stats',  notCheckable = true, isTitle = true},
+			{ text = 'Detailed Mobs Stats',  value = 'daily', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Detailed Items Stats', value = 'daily', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Zone Stats',   notCheckable = true, isTitle = true},
+			{ text = 'Detailed Mobs Stats',  value = 'zone',  arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Detailed Items Stats', value = 'zone',  arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
 		}
 	end
 
