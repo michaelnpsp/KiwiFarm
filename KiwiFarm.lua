@@ -51,13 +51,17 @@ local SOUNDS = CLASSIC and {
 }
 
 local DEFDATA = {
+	-- money
 	moneyCash      = 0,
 	moneyItems     = 0,
 	moneyByQuality = {},
+	-- items
 	countItems     = 0,
 	countByQuality = {},
 	lootedItems    = {},
-	mobKills       = 0,
+	-- mobs
+	countMobs      = 0,
+	killedMobs     = {},
 }
 
 -- database defaults
@@ -67,6 +71,8 @@ local DEFAULT = {
 	total   = {},
 	daily   = {},
 	zone    = {},
+	--
+	collect = { total = {}, daily = {}, zone = {} },
 	-- instance locks&resets
 	resets 	= {},
 	lockSpent = nil,
@@ -119,6 +125,7 @@ local session  -- config.session
 local resets   -- config.resets     instance resets table
 local disabled -- config.disabled   texts table
 local notify   -- config.notify     notifications table
+local collect  -- config.collect
 
 -- miscellaneous variables
 local inInstance
@@ -137,7 +144,7 @@ local timer   -- update timer
 -- utils & misc functions
 -- ============================================================================
 
-local function InitDB(dst, src, add, reset, norecurse)
+local function InitDB(dst, src, reset, norecurse)
 	if type(dst)~="table" then
 		dst = {}
 	elseif reset then
@@ -145,11 +152,22 @@ local function InitDB(dst, src, add, reset, norecurse)
 	end
 	for k,v in pairs(src) do
 		if type(v)=="table" and not norecurse then
-			dst[k] = InitDB(dst[k] or {}, v, add)
-		elseif add then
-			dst[k] = (dst[k] or 0) + v
+			dst[k] = InitDB(dst[k] or {}, v)
 		elseif dst[k]==nil then
 			dst[k] = v
+		end
+	end
+	return dst
+end
+
+local function AddDB(dst, src, blacklist)
+	for k,v in pairs(src) do
+		if not (blacklist and blacklist[k]) then
+			if type(v)=="table" then
+				dst[k] = AddDB(dst[k] or {}, v)
+			else
+				dst[k] = (dst[k] or 0) + v
+			end
 		end
 	end
 	return dst
@@ -159,7 +177,7 @@ local function GetZoneDB(key)
 	key = key or GetZoneText()
 	local data = config.zone[key]
 	if not data then
-		data = InitDB({}, DEFDATA)
+		data = InitDB({ _type = 'zone', _key = key }, DEFDATA)
 		config.zone[key] = data
 	end
 	return data
@@ -169,7 +187,7 @@ local function GetDailyDB(datetime)
 	local key  = date("%Y/%m/%d", datetime)
 	local data = config.daily[key]
 	if not data then
-		data = InitDB({}, DEFDATA)
+		data = InitDB({ _type = 'daily', _key = key }, DEFDATA)
 		config.daily[key] = data
 	end
 	return data
@@ -501,7 +519,7 @@ do
 		if not disabled.count then
 			-- mob kills
 			data[#data+1] = combatCurKills or combatPreKills
-			data[#data+1] = session.mobKills
+			data[#data+1] = session.countMobs
 			-- items looted
 			data[#data+1] = session.countItems
 		end
@@ -596,10 +614,12 @@ local function SessionFinish()
 		session.duration  = (session.duration or 0) + (curTime - (session.startTime or curTime))
 		session.startTime = nil
 		session.zoneName  = nil
-		InitDB(config.total, session, true)
-		InitDB(GetDailyDB(curTime), session, true)
-		InitDB(GetZoneDB(zoneName), session, true)
-		InitDB(session, DEFDATA, false, true)
+		if session.moneyCash>0 or session.moneyItems>0 or session.countItems>0 or session.countMobs>0 then
+			AddDB(config.total, session, collect.total)
+			AddDB(GetDailyDB(curTime), session, collect.daily)
+			AddDB(GetZoneDB(zoneName), session, collect.zone)
+		end
+		InitDB(session, DEFDATA,  true)
 		session.duration = nil
 		timeLootedItems = curTime
 		RefreshText()
@@ -809,13 +829,14 @@ end
 -- If we kill a npc inside instance a ResetInstance() is executed on player logout, so we need this to track
 -- and save this hidden reset, see addon:PLAYER_LOGOUT()
 function addon:COMBAT_LOG_EVENT_UNFILTERED()
-	local _, eventType,_,_,_,_,_,dstGUID,_,dstFlags = CombatLogGetCurrentEventInfo()
+	local _, eventType,_,_,_,_,_,dstGUID,dstName,dstFlags = CombatLogGetCurrentEventInfo()
 	if eventType == 'UNIT_DIED' and band(dstFlags,COMBATLOG_OBJECT_CONTROL_NPC)~=0 then
 		if inInstance and not config.lockSpent then
 			config.lockSpent = time()
 			timer:Play()
 		end
-		session.mobKills = session.mobKills + 1
+		session.countMobs = session.countMobs + 1
+		session.killedMobs[dstName] = (session.killedMobs[dstName] or 0) + 1
 		combatCurKills = (combatCurKills or 0) + 1
 	end
 end
@@ -865,13 +886,14 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	if not root then root = {}; KiwiFarmDB = root; end
 	config = root[serverKey]
 	if not config then config = { resets = {} }; root[serverKey] = config; end
-	InitDB(config, DEFAULT, nil, nil, true)
+	InitDB(config, DEFAULT, false, true)
 	InitDB(config.session, DEFDATA)
 	InitDB(config.total, DEFDATA)
 	session  = config.session
 	resets   = config.resets
 	notify   = config.notify
 	disabled = config.disabled
+	collect  = config.collect
 	-- minimap icon
 	LibStub("LibDBIcon-1.0"):Register(addonName, LibStub("LibDataBroker-1.1"):NewDataObject(addonName, {
 		type  = "launcher",
@@ -1051,7 +1073,7 @@ do
 	end
 
 	-- here starts the definition of the KiwiFrame menu, misc functions
-	local stats -- reference to table stats data ( = config.session | config.total | config.daily[key] )
+	local stats -- reference to table stats data ( = config.session | config.total | config.zone[key] | config.daily[key] )
 
 	local function InitPriceSources(menu)
 		for i=#menu,1,-1 do
@@ -1093,6 +1115,16 @@ do
 	local function SetDisplay(info)
 		disabled[info.value] = (not disabled[info.value]) or nil
 		LayoutFrame()
+	end
+	local function getSessionText()
+		return (session.startTime and 'Session Pause') or (session.duration and 'Session Continue') or 'Session Start'
+	end
+	local function setSession()
+		if session.startTime then
+			SessionStop()
+		else
+			SessionStart()
+		end
 	end
 
 	-- submenu: farmZones
@@ -1234,17 +1266,19 @@ do
 	local menuLootedItems
 	do
 		local function getText(info)
-			local data = stats.lootedItems[info.value]
+			local data = stats.lootedItems and stats.lootedItems[info.value]
 			return data and format("%sx%d %s", info.value, data.quantity, FmtMoneyShort(data.money)) or info.value
 		end
 		menuLootedItems = { init = function(menu, level)
 			local value = getMenuValue(level)
 			if timeLootedItems>(menu.time or -1) or value~=menu.value then
 				wipeMenu(menu)
-				for itemLink, data in pairs(stats.lootedItems) do
-					if type(value)~='number' or value==select(3,GetItemInfo(itemLink)) then
-						local name = strmatch(itemLink, '%|h%[(.+)%]%|h')
-						tinsert( menu, { text = getText, value = itemLink, arg1 = name, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
+				if stats.lootedItems then
+					for itemLink, data in pairs(stats.lootedItems) do
+						if type(value)~='number' or value==select(3,GetItemInfo(itemLink)) then
+							local name = strmatch(itemLink, '%|h%[(.+)%]%|h')
+							tinsert( menu, { text = getText, value = itemLink, arg1 = name, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
+						end
 					end
 				end
 				if menu[1] then
@@ -1256,6 +1290,30 @@ do
 				menu.value = value
 			end
 		end }
+	end
+
+	-- submenu: killed Mobs
+	local menuKilledMobs
+	do
+		local function getText(info)
+			local value = stats.killedMobs[info.value]
+			return value and format("%s: %d", info.value, value ) or 'None'
+		end
+		menuKilledMobs = {
+			{ text = getText, value = '', notCheckable = true },
+			init = function(menu)
+				local i = 1
+				for name, count in pairs(stats.killedMobs) do
+					menu[i] = menu[i] or { text = getText, value = name, notCheckable = true }
+					menu[i].value = name
+					i = i + 1
+				end
+				while #menu>1 and i<=#menu do menu[#menu] = nil; end
+				if #menu>1 then
+					splitMenu(menu, 'value' )
+				end
+			end
+		}
 	end
 
 	-- submenu: fonts
@@ -1372,6 +1430,31 @@ do
 		end
 	end }
 
+	-- submenu: stats maintenance
+	local menuStatsMisc = {
+		{ text = 'Clear looted items',  disabled = function() return not next(stats.lootedItems) end, notCheckable = true, func = function()
+			addon:ConfirmDialog( "Are you sure you want to delete all looted items stored in this section ?", function()
+				wipe(stats.lootedItems)
+				timeLootedItems = time()
+			end)
+		end	},
+		{ text = 'Clear killed mobs',  disabled = function() return not next(stats.killedMobs) end, notCheckable = true, func = function()
+			addon:ConfirmDialog( "Are you sure you want to delete all killed mobs stored in this section ?", function()
+				wipe(stats.killedMobs)
+			end)
+		end	},
+		{ text = 'Clear all data', notCheckable = true, func = function()
+			local stats = stats
+			addon:ConfirmDialog( "Are you sure you want to delete all data in this section ?", function()
+				if stats._type then
+					config[stats._type][stats._key] = nil  -- zone & daily
+				else
+					InitDB(stats, DEFDATA, true) -- session & total
+				end
+			end)
+		end },
+	}
+
 	-- submenu: stats
 	local menuStats = {
 		{ notCheckable = true },
@@ -1379,8 +1462,12 @@ do
 		{ notCheckable = true },
 		{ notCheckable = true },
 		{ notCheckable = true },
+		{ notCheckable = true },
+		{ notCheckable = true },
 		{ text = 'Gold by Quality', notCheckable = true, hasArrow = true, menuList = menuGoldQuality },
 		{ text = 'Gold by Item',    notCheckable = true, hasArrow = true, menuList = menuLootedItems },
+		{ text = 'Killed Mobs',     notCheckable = true, hasArrow = true, menuList = menuKilledMobs  },
+		{ text = 'Maintenance',     notCheckable = true, hasArrow = true, menuList = menuStatsMisc   },
 		init = function(menu,level)
 			local curTime = time()
 			local field = getMenuValue(level)
@@ -1389,14 +1476,15 @@ do
 			local mhour = stats.duration and stats.duration>0 and floor(money*3600/stats.duration) or 0
 			local ftime = (stats.duration or 0) + curTime - (stats.startTime or curTime)
 			menu[1].text = format("Farm Time: %s", FmtDuration(ftime))
-			menu[2].text = format("Gold total: %s", FmtMoney(money))
-			menu[3].text = format("Gold/hour: %s", FmtMoney(mhour))
-			menu[4].text = format("Items looted: %d", stats.countItems)
-			menu[5].text = format("Mobs killed: %d", stats.mobKills)
+			menu[2].text = format("Gold cash: %s", FmtMoney(stats.moneyCash))
+			menu[3].text = format("Gold items: %s", FmtMoney(stats.moneyItems))
+			menu[4].text = format("Gold/hour: %s", FmtMoney(mhour))
+			menu[5].text = format("Gold total: %s", FmtMoney(money))
+			menu[6].text = format("Items looted: %d", stats.countItems)
+			menu[7].text = format("Mobs killed: %d", stats.countMobs)
 			timeLootedItems = curTime
 		end,
 	}
-
 	-- submenu: daily stats
 	local menuDaily = {	init = function(menu)
 		local tim, pre, key = time()
@@ -1416,29 +1504,52 @@ do
 	end	}
 
 	-- submenu: zone stats
-	local menuZone = { init = function(menu)
-		local i = 1
-		if next(config.zone) then
+	local menuZone = {
+		{  text = 'None', notCheckable = true },
+		init = function(menu)
+			local i = 1
 			for zoneName, data in pairs(config.zone) do
-				menu[i] = menu[i] or { notCheckable = true, hasArrow = true, menuList = menuStats }
+				menu[i] = menu[i] or { notCheckable = true }
 				menu[i].text = zoneName
 				menu[i].value = data
+				menu[i].hasArrow = true
+				menu[i].menuList = menuStats
 				i = i + 1
 			end
-		else
-			i = 2
-			menu[1] = menu[1] or { notCheckable = true }
-			menu[1].text = 'None'
-			menu[1].hasArrow = nil
+			if i==1 then
+				menu[1].text = 'None'
+				menu[1].hasArrow = nil
+			end
+			while #menu>1 and i<=#menu do menu[#menu] = nil; end
 		end
-		while #menu>=i do menu[#menu] = nil; end
-	end	}
+	}
+
+	-- submenu: data collect
+	local menuCollect
+	do
+		local function checked(info)
+			return not collect[info.value][info.arg1]
+		end
+		local function set(info)
+			collect[info.value][info.arg1] = not collect[info.value][info.arg1] or nil
+		end
+		menuCollect = {
+			{ text = 'Totals',      notCheckable = true, isTitle = true},
+			{ text = 'Detailed Mobs Info',  value = 'total', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Detailed Items Info', value = 'total', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Daily Data',  notCheckable = true, isTitle = true},
+			{ text = 'Detailed Mobs Info',  value = 'daily', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Detailed Items Info', value = 'daily', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Zone Data',   notCheckable = true, isTitle = true},
+			{ text = 'Detailed Mobs Info',  value = 'zone',  arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Detailed Items Info', value = 'zone',  arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+		}
+	end
 
 	-- menu: main
 	local menuMain = {
 		{ text = 'Kiwi Farm [/kfarm]', notCheckable = true, isTitle = true },
-		{ text = 'Session Start',      notCheckable = true, disabled = function() return session.startTime end, func = SessionStart },
-		{ text = 'Session Stop',       notCheckable = true, disabled = function() return not session.startTime end, func = SessionStop  },
+		{ text = getSessionText,       notCheckable = true, func = setSession },
 		{ text = 'Session Finish',     notCheckable = true, disabled = function() return not (session.startTime or session.duration) end, func = SessionFinish },
 		{ text = 'Reset Instances',    notCheckable = true, func = ResetInstances },
 		{ text = 'Statistics',         notCheckable = true, isTitle = true },
@@ -1462,16 +1573,19 @@ do
 			},
 		} },
 		{ text = 'Notifications', notCheckable = true, hasArrow = true, menuList = {
-			{ text = FmtQuality(0),  value = 0,       notCheckable = true, hasArrow = true, menuList = menuNotify },
-			{ text = FmtQuality(1),  value = 1,       notCheckable = true, hasArrow = true, menuList = menuNotify },
-			{ text = FmtQuality(2),  value = 2,       notCheckable = true, hasArrow = true, menuList = menuNotify },
-			{ text = FmtQuality(3),  value = 3,       notCheckable = true, hasArrow = true, menuList = menuNotify },
-			{ text = FmtQuality(4),  value = 4,       notCheckable = true, hasArrow = true, menuList = menuNotify },
-			{ text = FmtQuality(5),  value = 5,       notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(0),  value = 0, notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(1),  value = 1, notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(2),  value = 2, notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(3),  value = 3, notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(4),  value = 4, notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = FmtQuality(5),  value = 5, notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = 'All Items looted', value = 'price', notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = 'Money looted', value = 'money', notCheckable = true, hasArrow = true, menuList = menuNotify },
 		} },
-		{ text = 'Farming Zones', notCheckable= true, hasArrow = true, menuList = menuZones },
+		{ text = 'Miscellaneous', notCheckable= true, hasArrow = true, menuList = {
+			{ text = 'Farming Zones',   notCheckable= true, hasArrow = true, menuList = menuZones },
+			{ text = 'Data Collection', notCheckable= true, hasArrow = true, menuList = menuCollect },
+		} },
 		{ text = 'Appearance', notCheckable= true, hasArrow = true, menuList = {
 			{ text = 'Display Info', notCheckable= true, hasArrow = true, menuList = {
 				{ text = 'Lock&Resets',      value = 'reset',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
