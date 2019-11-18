@@ -71,7 +71,7 @@ local DEFAULT = {
 	total   = {},
 	daily   = {},
 	zone    = {},
-	--
+	-- fields blacklists
 	collect = { total = {}, daily = {}, zone = {} },
 	-- instance locks&resets
 	resets 	= {},
@@ -163,9 +163,10 @@ end
 local function AddDB(dst, src, blacklist)
 	for k,v in pairs(src) do
 		if not (blacklist and blacklist[k]) then
-			if type(v)=="table" then
+			local typ = type(v)
+			if typ=="table" then
 				dst[k] = AddDB(dst[k] or {}, v)
-			else
+			elseif typ=='number' then
 				dst[k] = (dst[k] or 0) + v
 			end
 		end
@@ -559,11 +560,11 @@ local function AdjustLootedItemMoneyStats(itemLink)
 			local newMoney = newPrice * quantity
 			local moneyDiff = newMoney - money
 			if moneyDiff ~= 0 then
-				lootedItem.money = newMoney
-				session.lootedItems[itemLink] = { money, quantity }
+				session.lootedItems[itemLink] = { money+moneyDiff, quantity }
 				session.moneyItems = math.max(0, session.moneyItems + moneyDiff)
 				session.moneyByQuality[quality] = math.max(0, session.moneyByQuality[quality] + moneyDiff)
 				RefreshText()
+				return true
 			end
 		end
 	end
@@ -896,6 +897,11 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	notify   = config.notify
 	disabled = config.disabled
 	collect  = config.collect
+	-- remove old data from database
+	local key = date("%Y/%m/%d", time()-86400*7)
+	for k,v in next, config.daily do
+		if k<key then config.daily[k] = nil; end
+	end
 	-- minimap icon
 	LibStub("LibDBIcon-1.0"):Register(addonName, LibStub("LibDataBroker-1.1"):NewDataObject(addonName, {
 		type  = "launcher",
@@ -1191,6 +1197,14 @@ do
 	-- submenus: item sources, price sources
 	local menuPriceItems, menuItemSources
 	do
+		-- hackish way to refresh the price of the item in the parent button text.
+		-- parent button must set arg2 = function that returns the text to display (see menuLootedItems init code)
+		local function refreshParentButton(info)
+			local button = select(2, info:GetParent():GetPoint())
+			if button and type(button.arg2) == 'function' then
+				UIDropDownMenu_SetButtonText(getMenuLevel(button), button:GetID(), button.arg2(button))
+			end
+		end
 		local function deleteItem(itemLink, confirm)
 			if not confirm then
 				config.priceByItem[itemLink] = nil
@@ -1216,7 +1230,9 @@ do
 					deleteItem(itemLink, info.arg2 )
 				end
 			end
-			AdjustLootedItemMoneyStats(itemLink)
+			if AdjustLootedItemMoneyStats(itemLink) then
+				refreshParentButton(info)
+			end
 		end
 		local function getItemPriceSource(itemLink, source)
 			local sources  = config.priceByItem[itemLink]
@@ -1279,7 +1295,7 @@ do
 					for itemLink in pairs(stats.lootedItems) do
 						if type(value)~='number' or value==select(3,GetItemInfo(itemLink)) then
 							local name = strmatch(itemLink, '%|h%[(.+)%]%|h')
-							tinsert( menu, { text = getText, value = itemLink, arg1 = name, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
+							tinsert( menu, { text = getText, value = itemLink, arg1 = name, arg2 = getText, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
 						end
 					end
 				end
@@ -1453,6 +1469,7 @@ do
 				else
 					InitDB(stats, DEFDATA, true) -- session & total
 				end
+				CloseDropDownMenus()
 			end)
 		end },
 	}
@@ -1464,8 +1481,8 @@ do
 		{ notCheckable = true },
 		{ notCheckable = true },
 		{ notCheckable = true },
-		{ notCheckable = true },
-		{ notCheckable = true },
+		-- { notCheckable = true },
+		-- { notCheckable = true },
 		{ text = 'Looted Items', notCheckable = true, hasArrow = true, menuList = menuGoldQuality },
 		{ text = 'Killed Mobs',  notCheckable = true, hasArrow = true, menuList = menuKilledMobs  },
 		{ text = 'Maintenance',  notCheckable = true, hasArrow = true, menuList = menuStatsMisc   },
@@ -1474,15 +1491,16 @@ do
 			local field = getMenuValue(level)
 			stats = config[field] or field
 			local money = stats.moneyCash+stats.moneyItems
-			local mhour = stats.duration and stats.duration>0 and floor(money*3600/stats.duration) or 0
+			local duration = curTime - (stats.startTime or curTime) + (stats.duration or 0)
+			local mhour = duration>0 and floor(money*3600/duration) or 0
 			local ftime = (stats.duration or 0) + curTime - (stats.startTime or curTime)
 			menu[1].text = format("Farm Time: %s", FmtDuration(ftime))
 			menu[2].text = format("Gold cash: %s", FmtMoney(stats.moneyCash))
 			menu[3].text = format("Gold items: %s", FmtMoney(stats.moneyItems))
 			menu[4].text = format("Gold/hour: %s", FmtMoney(mhour))
 			menu[5].text = format("Gold total: %s", FmtMoney(money))
-			menu[6].text = format("Items looted: %d", stats.countItems)
-			menu[7].text = format("Mobs killed: %d", stats.countMobs)
+			menu[6].text = format("Items looted (%d)", stats.countItems)
+			menu[7].text = format("Mobs killed (%d)", stats.countMobs)
 			timeLootedItems = curTime
 		end,
 	}
@@ -1490,17 +1508,24 @@ do
 	local menuDaily = {	init = function(menu)
 		local tim, pre, key = time()
 		for i=1,7 do
+			menu[i] = menu[i] or { notCheckable = true, hasArrow = true, menuList = menuStats }
 			key, pre = date("%Y/%m/%d", tim), pre and date("%m/%d", tim) or 'Today'
 			local data = config.daily[key]
 			if data then
 				local money = data and data.moneyCash+data.moneyItems or 0
-				menu[i] = menu[i] or { notCheckable = true, hasArrow = true, menuList = menuStats }
 				menu[i].text = format('%s: %s', pre, FmtMoney(money) )
 				menu[i].value = data
+				menu[i].hasArrow = true
 			else
-				menu[i] = nil
+				menu[i].text = format('%s: -', pre)
+				menu[i].value = nil
+				menu[i].hasArrow = nil
 			end
 			tim = tim - 86400
+		end
+		local i = 7
+		while menu[i] and menu[i].value==nil do
+			menu[i] = nil; i = i - 1
 		end
 	end	}
 
@@ -1536,14 +1561,14 @@ do
 		end
 		menuCollect = {
 			{ text = 'Total Stats',      notCheckable = true, isTitle = true},
-			{ text = 'Detailed Mobs Stats',  value = 'total', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
-			{ text = 'Detailed Items Stats', value = 'total', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Detailed mobs info',  value = 'total', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Detailed items info', value = 'total', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
 			{ text = 'Daily Stats',  notCheckable = true, isTitle = true},
-			{ text = 'Detailed Mobs Stats',  value = 'daily', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
-			{ text = 'Detailed Items Stats', value = 'daily', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Detailed mobs info',  value = 'daily', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Detailed items info', value = 'daily', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
 			{ text = 'Zone Stats',   notCheckable = true, isTitle = true},
-			{ text = 'Detailed Mobs Stats',  value = 'zone',  arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
-			{ text = 'Detailed Items Stats', value = 'zone',  arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Detailed mobs info',  value = 'zone',  arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = 'Detailed items info', value = 'zone',  arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
 		}
 	end
 
@@ -1584,10 +1609,6 @@ do
 			{ text = 'Money looted', value = 'money', notCheckable = true, hasArrow = true, menuList = menuNotify },
 		} },
 		{ text = 'Miscellaneous', notCheckable= true, hasArrow = true, menuList = {
-			{ text = 'Farming Zones',   notCheckable= true, hasArrow = true, menuList = menuZones },
-			{ text = 'Data Collection', notCheckable= true, hasArrow = true, menuList = menuCollect },
-		} },
-		{ text = 'Appearance', notCheckable= true, hasArrow = true, menuList = {
 			{ text = 'Display Info', notCheckable= true, hasArrow = true, menuList = {
 				{ text = 'Lock&Resets',      value = 'reset',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 				{ text = 'Mobs&Items Count', value = 'count',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
@@ -1598,6 +1619,10 @@ do
 				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 				 value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
 				{ text = '999|cffffd70ag|r', 								 value = '%d|cffffd70ag|r', 				checked = MoneyFmtChecked, func = SetMoneyFmt },
 			} },
+			{ text = 'Data Collection', notCheckable= true, hasArrow = true, menuList = menuCollect },
+			{ text = 'Farming Zones',   notCheckable= true, hasArrow = true, menuList = menuZones },
+		} },
+		{ text = 'Appearance', notCheckable= true, hasArrow = true, menuList = {
 			{ text = 'Frame Anchor', notCheckable= true, hasArrow = true, menuList = {
 				{ text = 'Top Left',     value = 'TOPLEFT',     checked = AnchorChecked, func = SetAnchor },
 				{ text = 'Top Right',    value = 'TOPRIGHT',    checked = AnchorChecked, func = SetAnchor },
