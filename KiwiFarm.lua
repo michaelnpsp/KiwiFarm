@@ -564,7 +564,6 @@ local function AdjustLootedItemMoneyStats(itemLink)
 				session.moneyItems = math.max(0, session.moneyItems + moneyDiff)
 				session.moneyByQuality[quality] = math.max(0, session.moneyByQuality[quality] + moneyDiff)
 				RefreshText()
-				return true
 			end
 		end
 	end
@@ -643,15 +642,22 @@ local function SavePosition()
 	p.x, p.y = x-cx, y-cy
 end
 
+-- frame visibility (needed to avoid visual glicth when layout is changed)
+local function UpdateFrameAlpha()
+	addon:SetScript('OnUpdate', nil)
+	addon:SetAlpha(1)
+end
+
 -- frame sizing
 local function UpdateFrameSize()
 	addon:SetHeight( textl:GetHeight() + MARGIN*2 )
 	addon:SetWidth( config.frameWidth or (textl:GetWidth() * 2.3) + MARGIN*2 )
-	addon:SetScript('OnUpdate', nil)
+	addon:SetScript('OnUpdate', UpdateFrameAlpha)
 end
 
 -- layout main frame
 local function LayoutFrame()
+	addon:SetAlpha(0)
 	-- background
 	texture:SetColorTexture( unpack(config.backColor or COLOR_TRANSPARENT) )
 	-- text left
@@ -1197,12 +1203,16 @@ do
 	-- submenus: item sources, price sources
 	local menuPriceItems, menuItemSources
 	do
-		-- hackish way to refresh the price of the item in the parent button text.
-		-- parent button must set arg2 = function that returns the text to display (see menuLootedItems init code)
-		local function refreshParentButton(info)
+		-- hackish way to refresh the price of the items in the parent buttons (quality money & item money).
+		-- parent buttons must set arg2 = function that returns the text to display (see menuLootedItems init code)
+		local function refreshParentButtons(info)
 			local button = select(2, info:GetParent():GetPoint())
 			if button and type(button.arg2) == 'function' then
 				UIDropDownMenu_SetButtonText(getMenuLevel(button), button:GetID(), button.arg2(button))
+				local button = select(2, button:GetParent():GetPoint())
+				if button and type(button.arg2) == 'function' then
+					UIDropDownMenu_SetButtonText(getMenuLevel(button), button:GetID(), button.arg2(button))
+				end
 			end
 		end
 		local function deleteItem(itemLink, confirm)
@@ -1230,9 +1240,8 @@ do
 					deleteItem(itemLink, info.arg2 )
 				end
 			end
-			if AdjustLootedItemMoneyStats(itemLink) then
-				refreshParentButton(info)
-			end
+			AdjustLootedItemMoneyStats(itemLink)
+			refreshParentButtons(info)
 		end
 		local function getItemPriceSource(itemLink, source)
 			local sources  = config.priceByItem[itemLink]
@@ -1440,13 +1449,20 @@ do
 	end
 
 	-- submenu: gold earned by item quality
-	local menuGoldQuality = { init = function(menu)
-		for i=1,5 do
-			local quality = i-1
-			menu[i] = menu[i] or { notCheckable = true, hasArrow = true, value = quality, menuList = menuLootedItems }
-			menu[i].text = format( "%s: %s (%d)", FmtQuality(quality), FmtMoney(stats.moneyByQuality[quality] or 0), stats.countByQuality[quality] or 0)
+	local menuGoldQuality
+	do
+		local function getText(info)
+			local quality = info.value
+			return format( "%s: %s (%d)", FmtQuality(quality), FmtMoney(stats.moneyByQuality[quality] or 0), stats.countByQuality[quality] or 0)
 		end
-	end }
+		menuGoldQuality = {
+			{ text = getText, arg2 = getText, notCheckable = true, hasArrow = true, value = 0, menuList = menuLootedItems },
+			{ text = getText, arg2 = getText, notCheckable = true, hasArrow = true, value = 1, menuList = menuLootedItems },
+			{ text = getText, arg2 = getText, notCheckable = true, hasArrow = true, value = 2, menuList = menuLootedItems },
+			{ text = getText, arg2 = getText, notCheckable = true, hasArrow = true, value = 3, menuList = menuLootedItems },
+			{ text = getText, arg2 = getText, notCheckable = true, hasArrow = true, value = 4, menuList = menuLootedItems },
+		}
+	end
 
 	-- submenu: stats maintenance
 	local menuStatsMisc = {
@@ -1481,8 +1497,6 @@ do
 		{ notCheckable = true },
 		{ notCheckable = true },
 		{ notCheckable = true },
-		-- { notCheckable = true },
-		-- { notCheckable = true },
 		{ text = 'Looted Items', notCheckable = true, hasArrow = true, menuList = menuGoldQuality },
 		{ text = 'Killed Mobs',  notCheckable = true, hasArrow = true, menuList = menuKilledMobs  },
 		{ text = 'Maintenance',  notCheckable = true, hasArrow = true, menuList = menuStatsMisc   },
