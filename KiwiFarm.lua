@@ -102,8 +102,10 @@ local type = type
 local next = next
 local print = print
 local pairs = pairs
+local ipairs = ipairs
 local unpack = unpack
 local tinsert = tinsert
+local tremove = tremove
 local tonumber = tonumber
 local gsub = gsub
 local strfind = strfind
@@ -987,7 +989,7 @@ do
 	local menuFrame = CreateFrame("Frame", "KiwiFarmPopupMenu", UIParent, "UIDropDownMenuTemplate")
 
 	-- generic & enhanced popup menu management code, reusable for other menus
-	local showMenu, refreshMenu, getMenuLevel, getMenuValue, splitMenu, wipeMenu
+	local showMenu, refreshMenu, getMenuLevel, getMenuValue
 	do
 		-- menu initialization: special management of enhanced menuList tables, using fields not supported by the base UIDropDownMenu code.
 		local function initialize( frame, level, menuList )
@@ -1037,33 +1039,6 @@ do
 		function getMenuValue(element)
 			return element and (UIDROPDOWNMENU_OPEN_MENU.menuValues[type(element)=='table' and getMenuLevel(element) or element]) or UIDROPDOWNMENU_MENU_VALUE
 		end
-		-- clear menu table, preserving special control fields
-		function wipeMenu(menu)
-			local init = menu.init;	wipe(menu); menu.init = init
-		end
-		-- split a big menu items table in several submenus
-		function splitMenu(menu, fsort, fdisp)
-			fsort = fsort or 'text'
-			fdisp = fdisp or fsort
-			table.sort(menu, function(a,b) return a[fsort]<b[fsort] end )
-			local count, items, first, last = #menu
-			if count>28 then
-				for i=1,count do
-					if not items or #items>=28 then
-						if items then
-							menu[#menu].text = strfirstword(first[fdisp]) .. ' - ' .. strfirstword(last[fdisp])
-						end
-						items = {}
-						tinsert(menu, { notCheckable= true, hasArrow = true, useParentValue = true, menuList = items } )
-						first = menu[1]
-					end
-					last = table.remove(menu,1)
-					tinsert(items, last)
-				end
-				menu[#menu].text = strfirstword(first[fdisp]) .. ' - ' .. strfirstword(last[fdisp])
-				return true
-			end
-		end
 		-- refresh a submenu ( element = level | button | dropdownlist )
 		function refreshMenu(element, hideChilds)
 			local level = type(element)=='number' and element or getMenuLevel(element)
@@ -1085,6 +1060,70 @@ do
 			ToggleDropDownMenu(1, nil, menuFrame, anchor, x, y, menuList, nil, autoHideDelay);
 		end
 	end
+	-- Menu definition helper functions
+	local defMenuStart, defMenuAdd, defMenuEnd, splitMenu, wipeMenu
+	do
+		-- store unused tables to avoid generate garbage
+		local tables = {}
+		-- clear menu table, preserving special control fields
+		function wipeMenu(menu)
+			local init = menu.init;	wipe(menu); menu.init = init
+		end
+		-- split a big menu items table in several submenus
+		function splitMenu(menu, fsort, fdisp)
+			local count = #menu
+			if count>1 then
+				fsort = fsort or 'text'
+				fdisp = fdisp or fsort
+				table.sort(menu, function(a,b) return a[fsort]<b[fsort] end )
+				local items, first, last
+				if count>28 then
+					for i=1,count do
+						if not items or #items>=28 then
+							if items then
+								menu[#menu].text = strfirstword(first[fdisp]) .. ' - ' .. strfirstword(last[fdisp])
+							end
+							items = {}
+							tinsert(menu, { notCheckable = true, hasArrow = true, useParentValue = true, menuList = items } )
+							first = menu[1]
+						end
+						last = table.remove(menu,1)
+						tinsert(items, last)
+					end
+					menu[#menu].text = strfirstword(first[fdisp]) .. ' - ' .. strfirstword(last[fdisp])
+					menu._split = true
+					return true
+				end
+			end
+		end
+		-- start menu definition
+		function defMenuStart(menu)
+			local split = menu._split
+			for _,item in ipairs(menu) do
+				if split and item.menuList then
+					for _,item in ipairs(item.menuList) do
+						tables[#tables+1] = item; wipe(item)
+					end
+				end
+				tables[#tables+1] = item; wipe(item)
+			end
+			wipeMenu(menu)
+		end
+		-- add an item menu
+		function defMenuAdd(menu, text, value, menuList)
+			local item = tremove(tables) or {}
+			item.text, item.value, item.notCheckable, item.menuList, item.hasArrow = text, value, true, menuList, (menuList~=nil) or nil
+			menu[#menu+1] = item
+			return item
+		end
+		-- end menu definition
+		function defMenuEnd(menu, text)
+			if #menu==0 and text then
+				menu[1] = tremove(tables) or {}
+				menu[1].text, menu[1].notCheckable = text, true
+			end
+		end
+	end
 
 	-- here starts the definition of the KiwiFrame menu, misc functions
 	local stats -- reference to table stats data ( = config.session | config.total | config.zone[key] | config.daily[key] )
@@ -1092,7 +1131,7 @@ do
 	local function InitPriceSources(menu)
 		for i=#menu,1,-1 do
 			if (menu[i].arg1 =='Atr' and not Atr_GetAuctionPrice) or (menu[i].arg1 =='TSM' and not TSMAPI_FOUR) then
-				table.remove(menu,i)
+				tremove(menu,i)
 			end
 		end
 		menu.init = nil -- means do not call the function anymore
@@ -1169,14 +1208,13 @@ do
 
 	-- submenu: resets
 	local menuResets = { init = function(menu)
-		local item = { text = 'None', notCheckable = true }
+		defMenuStart(menu)
 		for i=1,5 do
 			if resets[i] then
-				item = menu[i] or { notCheckable = true }
-				item.text = date("%H:%M:%S",resets[i])
+				defMenuAdd(menu, date("%H:%M:%S",resets[i]))
 			end
-			menu[i], item = item, nil
 		end
+		defMenuEnd(menu, 'None')
 	end	}
 
 	-- submenu: quality sources
@@ -1299,20 +1337,18 @@ do
 		menuLootedItems = { init = function(menu, level)
 			local value = getMenuValue(level)
 			if timeLootedItems>(menu.time or -1) or value~=menu.value then
-				wipeMenu(menu)
+				defMenuStart(menu)
 				if stats.lootedItems then
 					for itemLink in pairs(stats.lootedItems) do
 						if type(value)~='number' or value==select(3,GetItemInfo(itemLink)) then
 							local name = strmatch(itemLink, '%|h%[(.+)%]%|h')
-							tinsert( menu, { text = getText, value = itemLink, arg1 = name, arg2 = getText, notCheckable = true, hasArrow = true, menuList = menuItemSources } )
+							local item = defMenuAdd(menu, getText, itemLink, menuItemSources)
+							item.arg1, item.arg2 = name, getText
 						end
 					end
 				end
-				if menu[1] then
-					splitMenu(menu, 'arg1')
-				else
-					menu[1] = { text = "None", notCheckable = true }
-				end
+				defMenuEnd(menu,'None')
+				splitMenu(menu, 'arg1')
 				menu.time  = timeLootedItems
 				menu.value = value
 			end
@@ -1327,18 +1363,13 @@ do
 			return value and format("%s: %d", info.value, value ) or 'None'
 		end
 		menuKilledMobs = {
-			{ text = getText, value = '', notCheckable = true },
 			init = function(menu)
-				local i = 1
+				defMenuStart(menu)
 				for name, count in pairs(stats.killedMobs) do
-					menu[i] = menu[i] or { text = getText, value = name, notCheckable = true }
-					menu[i].value = name
-					i = i + 1
+					defMenuAdd( menu, getText, name )
 				end
-				while #menu>1 and i<=#menu do menu[#menu] = nil; end
-				if #menu>1 then
-					splitMenu(menu, 'value' )
-				end
+				defMenuEnd(menu,'None')
+				splitMenu(menu, 'value')
 			end
 		}
 	end
@@ -1518,49 +1549,36 @@ do
 			timeLootedItems = curTime
 		end,
 	}
+
 	-- submenu: daily stats
 	local menuDaily = {	init = function(menu)
+		defMenuStart(menu)
 		local tim, pre, key = time()
 		for i=1,7 do
-			menu[i] = menu[i] or { notCheckable = true, hasArrow = true, menuList = menuStats }
 			key, pre = date("%Y/%m/%d", tim), pre and date("%m/%d", tim) or 'Today'
 			local data = config.daily[key]
 			if data then
 				local money = data and data.moneyCash+data.moneyItems or 0
-				menu[i].text = format('%s: %s', pre, FmtMoney(money) )
-				menu[i].value = data
-				menu[i].hasArrow = true
+				defMenuAdd(menu, format('%s: %s', pre, FmtMoney(money)), data, menuStats)
 			else
-				menu[i].text = format('%s: -', pre)
-				menu[i].value = nil
-				menu[i].hasArrow = nil
+				defMenuAdd(menu, format('%s: -', pre))
 			end
 			tim = tim - 86400
 		end
-		local i = 7
-		while menu[i] and menu[i].value==nil do
-			menu[i] = nil; i = i - 1
+		defMenuEnd(menu, 'None')
+		while #menu>1 and menu[#menu].value==nil do
+			tremove(menu)
 		end
 	end	}
 
 	-- submenu: zone stats
 	local menuZone = {
-		{  text = 'None', notCheckable = true },
 		init = function(menu)
-			local i = 1
+			defMenuStart(menu)
 			for zoneName, data in pairs(config.zone) do
-				menu[i] = menu[i] or { notCheckable = true }
-				menu[i].text = zoneName
-				menu[i].value = data
-				menu[i].hasArrow = true
-				menu[i].menuList = menuStats
-				i = i + 1
+				defMenuAdd(menu, zoneName, data, menuStats)
 			end
-			if i==1 then
-				menu[1].text = 'None'
-				menu[1].hasArrow = nil
-			end
-			while #menu>1 and i<=#menu do menu[#menu] = nil; end
+			defMenuEnd(menu, 'None')
 		end
 	}
 
