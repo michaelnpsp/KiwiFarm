@@ -73,9 +73,8 @@ local DEFAULT = {
 	zone    = {},
 	-- fields blacklists
 	collect = { total = {}, daily = {}, zone = {} },
-	-- instance locks&resets
-	resets 	= {},
-	lockSpent = nil,
+	-- instances locks&resets
+	resets 	= { count = 0, countd = 0 },
 	-- prices
 	priceByItem = {},
 	priceByQuality = { [0]={vendor=true}, [1]={vendor=true}, [2]={vendor=true}, [3]={vendor=true}, [4]={vendor=true}, [5]={vendor=true} },
@@ -93,6 +92,8 @@ local DEFAULT = {
 	fontsize    = nil,
 	framePos    = { anchor = 'TOPLEFT', x = 0, y = 0 },
 	minimapIcon = { hide = false },
+	-- debug
+	debug = {}
 }
 
 -- local references
@@ -114,8 +115,9 @@ local strlower = strlower
 local format = string.format
 local band = bit.band
 local strmatch = strmatch
-local IsInInstance = IsInInstance
 local GetZoneText = GetZoneText
+local IsInInstance = IsInInstance
+local GetInstanceInfo = GetInstanceInfo
 local GetItemInfo = GetItemInfo
 local COPPER_PER_GOLD = COPPER_PER_GOLD
 local COPPER_PER_SILVER = COPPER_PER_SILVER
@@ -131,6 +133,7 @@ local collect  -- config.collect
 
 -- miscellaneous variables
 local inInstance
+local curZoneName = ''
 local combatActive
 local combatCurKills = 0
 local combatPreKills = 0
@@ -177,7 +180,7 @@ local function AddDB(dst, src, blacklist)
 end
 
 local function GetZoneDB(key)
-	key = key or GetZoneText()
+	key = key or curZoneName
 	local data = config.zone[key]
 	if not data then
 		data = InitDB({ _type = 'zone', _key = key }, DEFDATA)
@@ -435,6 +438,51 @@ do
 	end
 end
 
+-- lock&resets management
+local LockAdd, LockDel, LockResetAll
+do
+	-- register instance used or reseted
+	function LockAdd(zone, reset)
+		if reset then -- register instances reseted
+			resets[zone] = nil
+			resets.count = resets.count + 1
+			for i=#resets,1,-1 do
+				if resets[i].zone==zone and not resets[i].reseted then
+					resets[i].reseted = true
+					resets.countd = resets.countd - 1
+					return
+				end
+			end
+		else -- register used/dirty instance
+			resets[zone] = true
+			resets.countd = resets.countd + 1
+		end
+		resets[#resets+1] =  { zone = zone, time =  time(), reseted = reset }
+	end
+	-- delete instance
+	function LockDel(i)
+		if resets[i].reseted then
+			resets.count = resets.count - 1
+		else
+			resets[ resets[i].zone ] = nil
+			resets.countd = resets.countd - 1
+		end
+		tremove(resets,i)
+	end
+	-- reset all used/dirty instances
+	function LockResetAll()
+		local i, expire = #resets, time()-3600
+		while i>0 and resets[i].time>expire do
+			if not resets[i].reseted and (not inInstance or resets[i].zone~=curZoneName) then
+				resets[i].reseted = true
+				resets[ resets[i].zone ] = nil
+				resets.count = resets.count + 1
+			end
+			i = i - 1
+		end
+	end
+end
+
 -- display farming info
 local PrepareText, RefreshText
 do
@@ -482,14 +530,15 @@ do
 	-- refresh text
 	function RefreshText()
 		local curtime = time()
-		-- refresh reset data if first reset is +1hour old
-		while (#resets>0 and curtime-resets[1]>3600) or #resets>RESET_MAX do -- remove old resets(>1hour)
-			table.remove(resets,1)
+		local exptime = curtime - 3600
+		-- delete old data
+		while (#resets>0 and resets[1].time<exptime) or #resets>RESET_MAX do -- remove old resets(>1hour)
+			LockDel(1)
 		end
 		-- reset old data
 		wipe(data)
 		-- zone text
-		data[#data+1] = ZoneTitle[ GetZoneText() ]
+		data[#data+1] = ZoneTitle[curZoneName]
 		-- session duration
 		local sSession = curtime - (session.startTime or curtime) + (session.duration or 0)
 		local m0, s0 = floor(sSession/60), sSession%60
@@ -500,21 +549,21 @@ do
 		data[#data+1] = s0
 		-- reset data
 		if not disabled.reset then
-			local timeLast  = resets[#resets]
-			local timeLock  = #resets>0 and resets[1]+3600 or nil
-			local remain    = RESET_MAX-#resets
-			local sReset = (timeLast and curtime-timeLast) or 0 -- (config.lockSpent and curtime-config.lockSpent) or 0
-			local sUnlock = timeLock and timeLock-curtime or 0
-			--
-			data[#data+1] = (remain==RESET_MAX and '|cFF00ff00') or (remain>0 and '|cFFff8000') or '|cFFff0000'
-			data[#data+1] = #resets
-			data[#data+1] = config.lockSpent and '|cFFff8000' or '|cFF00ff00'
+			local timeLast  = #resets>0 and resets[#resets].time
+			local timeLock  = #resets>0 and resets[1].time+3600 or nil
+			local remain    = RESET_MAX-resets.count
+			local sReset    = (timeLast and curtime-timeLast) or 0
+			local sUnlock   = timeLock and timeLock-curtime or 0
+			-- resets
+			data[#data+1] = (remain>1 and '|cFF00ff00') or (remain==1 and '|cFFff8000') or '|cFFff0000'
+			data[#data+1] = remain
+			data[#data+1] = resets.countd>0 and '|cFFff8000' or '|cFF00ff00'
 			data[#data+1] = floor(sReset/60)
 			data[#data+1] = sReset%60
-			--
-			data[#data+1] = remain>0 and '|cFF00ff00' or '|cFFff0000'
-			data[#data+1] = remain
-			data[#data+1] = remain<=0 and (sUnlock>60*5 and '|cFFff0000' or '|cFFff8000') or '|cFF00ff00'
+			-- locked
+			data[#data+1] = (remain==RESET_MAX and '|cFF00ff00') or (remain>0 and '|cFFff8000') or '|cFFff0000'
+			data[#data+1] = resets.count
+			data[#data+1] = remain<=0 and '|cFFff0000' or '|cFF00ff00'
 			data[#data+1] = floor(sUnlock/60)
 			data[#data+1] = sUnlock%60
 		end
@@ -541,7 +590,7 @@ do
 		-- set text
 		textr:SetFormattedText( text_mask, unpack(data) )
 		-- update timer status
-		local stopped = #resets==0 and not config.lockSpent and not session.startTime
+		local stopped = #resets==0 and not session.startTime
 		if stopped ~= not timer:IsPlaying() then
 			if stopped then
 				timer:Stop()
@@ -571,18 +620,6 @@ local function AdjustLootedItemMoneyStats(itemLink)
 	end
 end
 
--- register instance reset
-local function AddReset()
-	local curtime = time()
-	if curtime-(resets[#resets] or 0)>3 then -- ignore reset of additional instances
-		config.lockSpent = nil
-		tinsert( resets, curtime )
-		if addon:IsVisible() then
-			RefreshText()
-		end
-	end
-end
-
 -- session start
 local function SessionStart(refresh)
 	if not session.startTime or refresh then
@@ -591,7 +628,6 @@ local function SessionStart(refresh)
 		addon:RegisterEvent("PLAYER_REGEN_ENABLED")
 		addon:RegisterEvent("CHAT_MSG_LOOT")
 		addon:RegisterEvent("CHAT_MSG_MONEY")
-		addon:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
 		RefreshText()
 	end
 end
@@ -606,7 +642,6 @@ local function SessionStop()
 		addon:UnregisterEvent("PLAYER_REGEN_ENABLED")
 		addon:UnregisterEvent("CHAT_MSG_LOOT")
 		addon:UnregisterEvent("CHAT_MSG_MONEY")
-		addon:UnregisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
 	end
 end
 
@@ -614,7 +649,7 @@ end
 local function SessionFinish()
 	if session.startTime or session.duration then
 		local curTime     = time()
-		local zoneName    = session.zoneName or GetZoneText()
+		local zoneName    = session.zoneName or curZoneName
 		session.duration  = (session.duration or 0) + (curTime - (session.startTime or curTime))
 		session.startTime = nil
 		session.zoneName  = nil
@@ -700,10 +735,14 @@ addon:SetScript("OnMouseUp", function(self, button)
 end)
 
 -- track reset instance event
-local PATTERN_RESET = '^'..INSTANCE_RESET_SUCCESS:gsub("([^%w])","%%%1"):gsub('%%%%s','.+')..'$'
+local PATTERN_RESET = '^'..INSTANCE_RESET_SUCCESS:gsub("([^%w])","%%%1"):gsub('%%%%s','(.+)')..'$'
 function addon:CHAT_MSG_SYSTEM(event,msg)
-	if strfind(msg,PATTERN_RESET) then
-		AddReset()
+	local zone = strmatch(msg,PATTERN_RESET)
+	if zone then
+		LockAdd(zone, true)
+		if addon:IsVisible() then
+			RefreshText()
+		end
 	end
 end
 
@@ -738,7 +777,7 @@ function addon:CHAT_MSG_LOOT(event,msg)
 				session.countByQuality[rarity] = (session.countByQuality[rarity] or 0) + quantity
 				-- register zone if necessary
 				if not session.zoneName then
-					session.zoneName = GetZoneText()
+					session.zoneName = curZoneName
 				end
 				-- notifications
 				if notify[rarity] then Notify(rarity,   itemLink, quantity, money) end
@@ -761,7 +800,7 @@ do
 			session.moneyCash = session.moneyCash + money
 			-- register zone if necessary
 			if not session.zoneName then
-				session.zoneName = GetZoneText()
+				session.zoneName = curZoneName
 			end
 			-- notify
 			if notify.money then
@@ -787,14 +826,15 @@ end
 do
 	local lastZoneKey
 	function addon:ZONE_CHANGED_NEW_AREA(event)
-		local zone = GetZoneText()
+		inInstance = IsInInstance()
+		local zone =  inInstance and GetInstanceInfo() or GetZoneText()
 		if zone and zone~='' then
-			inInstance = IsInInstance()
 			local zoneKey = format("%s:%s",zone,tostring(inInstance))
 			if zoneKey ~= lastZoneKey or (not event) then -- no event => called from config
-				if inInstance and #resets>=RESET_MAX then -- locked but inside instance, means locked expired before estimated unlock time
-					table.remove(resets,1)
-				end
+				curZoneName = zone
+				--if inInstance and #resets>=RESET_MAX then -- locked but inside instance, means locked expired before estimated unlock time
+				--	LockDel(1)
+				--end
 				if config.farmZones then
 					if config.farmZones[zone] then
 						if inInstance and lastZoneKey then
@@ -828,9 +868,7 @@ do
 	hooksecurefunc("CancelLogout", function() isLogout=nil end)
 	function addon:PLAYER_LOGOUT()
 		if isLogout then
-			if config.lockSpent and not IsInInstance() then
-				AddReset()
-			end
+			LockResetAll() -- we must reset all used instances on logout
 			SessionStop()
 		end
 		config.reloadUI = not isLogout or nil
@@ -842,13 +880,16 @@ end
 function addon:COMBAT_LOG_EVENT_UNFILTERED()
 	local _, eventType,_,_,_,_,_,dstGUID,dstName,dstFlags = CombatLogGetCurrentEventInfo()
 	if eventType == 'UNIT_DIED' and band(dstFlags,COMBATLOG_OBJECT_CONTROL_NPC)~=0 then
-		if inInstance and not config.lockSpent then
-			config.lockSpent = time()
+		if inInstance and not resets[curZoneName] then
+			-- register used instance
+			LockAdd(curZoneName)
 			timer:Play()
 		end
-		session.countMobs = session.countMobs + 1
-		session.killedMobs[dstName] = (session.killedMobs[dstName] or 0) + 1
-		combatCurKills = (combatCurKills or 0) + 1
+		if session.startTime then
+			session.countMobs = session.countMobs + 1
+			session.killedMobs[dstName] = (session.killedMobs[dstName] or 0) + 1
+			combatCurKills = (combatCurKills or 0) + 1
+		end
 	end
 end
 
@@ -896,7 +937,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	local root = KiwiFarmDB
 	if not root then root = {}; KiwiFarmDB = root; end
 	config = root[serverKey]
-	if not config then config = { resets = {} }; root[serverKey] = config; end
+	if not config then config = {}; root[serverKey] = config; end
 	InitDB(config, DEFAULT, false, true)
 	InitDB(config.session, DEFDATA)
 	InitDB(config.total, DEFDATA)
@@ -930,9 +971,10 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	}) , config.minimapIcon)
 	-- events
 	addon:SetScript('OnEvent', function(self,event,...) self[event](self,event,...) end)
-	addon:RegisterEvent("CHAT_MSG_SYSTEM")
+	addon:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
 	addon:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 	addon:RegisterEvent("PLAYER_ENTERING_WORLD")
+	addon:RegisterEvent("CHAT_MSG_SYSTEM")
 	addon:RegisterEvent("PLAYER_LOGOUT")
 	-- frame position
 	RestorePosition()
@@ -1060,7 +1102,7 @@ do
 			ToggleDropDownMenu(1, nil, menuFrame, anchor, x, y, menuList, nil, autoHideDelay);
 		end
 	end
-	-- Menu definition helper functions
+	-- menu definition helper functions
 	local defMenuStart, defMenuAdd, defMenuEnd, splitMenu, wipeMenu
 	do
 		-- store unused tables to avoid generate garbage
@@ -1109,7 +1151,7 @@ do
 			end
 			wipeMenu(menu)
 		end
-		-- add an item menu
+		-- add an item to the menu
 		function defMenuAdd(menu, text, value, menuList)
 			local item = tremove(tables) or {}
 			item.text, item.value, item.notCheckable, item.menuList, item.hasArrow = text, value, true, menuList, (menuList~=nil) or nil
@@ -1125,7 +1167,7 @@ do
 		end
 	end
 
-	-- here starts the definition of the KiwiFrame menu, misc functions
+	-- here starts the definition of the KiwiFrame menu
 	local stats -- reference to table stats data ( = config.session | config.total | config.zone[key] | config.daily[key] )
 
 	local function InitPriceSources(menu)
@@ -1184,7 +1226,7 @@ do
 	local menuZones
 	do
 		local function ZoneAdd()
-			local zone = GetZoneText()
+			local zone = curZoneName
 			config.farmZones = config.farmZones or {}
 			config.farmZones[zone] = true
 			addon:ZONE_CHANGED_NEW_AREA()
@@ -1209,10 +1251,8 @@ do
 	-- submenu: resets
 	local menuResets = { init = function(menu)
 		defMenuStart(menu)
-		for i=1,5 do
-			if resets[i] then
-				defMenuAdd(menu, date("%H:%M:%S",resets[i]))
-			end
+		for _,reset in ipairs(resets) do
+			defMenuAdd(menu, format(reset.reseted and "%s - %s" or "|cFF808080%s - %s|r", date("%H:%M:%S",reset.time), reset.zone) )
 		end
 		defMenuEnd(menu, 'None')
 	end	}
@@ -1592,7 +1632,7 @@ do
 			collect[info.value][info.arg1] = not collect[info.value][info.arg1] or nil
 		end
 		menuCollect = {
-			{ text = 'Total Stats',      notCheckable = true, isTitle = true},
+			{ text = 'Total Stats', notCheckable = true, isTitle = true},
 			{ text = 'Detailed mobs info',  value = 'total', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
 			{ text = 'Detailed items info', value = 'total', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
 			{ text = 'Daily Stats',  notCheckable = true, isTitle = true},
@@ -1614,8 +1654,8 @@ do
 		{ text = 'Session',            notCheckable = true, hasArrow = true, value = 'session', menuList = menuStats },
 		{ text = 'Daily',              notCheckable = true, hasArrow = true, menuList = menuDaily },
 		{ text = 'Zones',              notCheckable = true, hasArrow = true, menuList = menuZone },
-		{ text = 'Total',              notCheckable = true, hasArrow = true, value = 'total',   menuList = menuStats },
-		{ text = 'Resets',             notCheckable = true, hasArrow = true, menuList = menuResets },
+		{ text = 'Totals',             notCheckable = true, hasArrow = true, value = 'total',   menuList = menuStats },
+		{ text = 'Locks&Resets',       notCheckable = true, hasArrow = true, menuList = menuResets },
 		{ text = 'Settings',           notCheckable = true, isTitle = true },
 		{ text = 'Prices of Items', notCheckable = true, hasArrow = true, menuList = {
 			{ text = FmtQuality(0), value = 0, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
