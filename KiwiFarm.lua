@@ -439,25 +439,28 @@ do
 end
 
 -- lock&resets management
-local LockAdd, LockDel, LockResetAll
+local LockAddReset, LockAddInstance, LockDel, LockResetAll
 do
-	-- register instance used or reseted
-	function LockAdd(zone, reset)
-		if reset then -- register instances reseted
-			resets[zone] = nil
-			resets.count = resets.count + 1
-			for i=#resets,1,-1 do
-				if resets[i].zone==zone and not resets[i].reseted then
-					resets[i].reseted = true
-					resets.countd = resets.countd - 1
-					return
-				end
+	-- register instance reset
+	function LockAddReset(zone)
+		local ctime = time()
+		resets.count = resets.count + 1
+		for i=#resets,1,-1 do
+			if resets[i].zone==zone and not resets[i].reseted then
+				resets[i].time = ctime
+				resets[i].reseted = ctime
+				resets.countd = resets.countd - 1
+				resets[zone] = nil
+				return
 			end
-		else -- register used/dirty instance
-			resets[zone] = true
-			resets.countd = resets.countd + 1
 		end
-		resets[#resets+1] =  { zone = zone, time =  time(), reseted = reset }
+		resets[#resets+1] =  { zone = zone, time =  ctime, reseted = ctime}
+	end
+	-- add used instance
+	function LockAddInstance(zone)
+		resets[zone] = true
+		resets.countd = resets.countd + 1
+		resets[#resets+1] =  { zone = zone, time =  time() }
 	end
 	-- delete instance
 	function LockDel(i)
@@ -471,12 +474,15 @@ do
 	end
 	-- reset all used/dirty instances
 	function LockResetAll()
-		local i, expire = #resets, time()-3600
+		local ctime = time()
+		local i, expire = #resets, ctime-3600
 		while i>0 and resets[i].time>expire do
 			if not resets[i].reseted and (not inInstance or resets[i].zone~=curZoneName) then
-				resets[i].reseted = true
-				resets[ resets[i].zone ] = nil
+				resets[i].time = ctime
+				resets[i].reseted = ctime
 				resets.count = resets.count + 1
+				resets[ resets[i].zone ] = nil
+				resets.countd = resets.countd - 1
 			end
 			i = i - 1
 		end
@@ -497,15 +503,14 @@ do
 		text_mask   = text_mask .. "%s%02d:%02d:%02d|r\n"  -- session duration
 		-- instance reset & lock info
 		if not disabled.reset then
-			text_header = text_header .. "Resets:\nLocked:\n"
-			text_mask   = text_mask   .. "(%s%d|r) %s%02d:%02d|r\n"  -- last reset
-			text_mask   = text_mask   .. "(%s%d|r) %s%02d:%02d|r\n"  -- lock time
+			text_header = text_header .. "Resets:\n"
+			text_mask   = text_mask   .. "%s%d|r||%s%02d:%02d|r\n"  -- last reset
 		end
 		-- count data
 		if not disabled.count then
 			-- mobs killed
 			text_header = text_header .. "Mobs killed:\n"
-			text_mask   = text_mask   .. "(%d) %d\n"
+			text_mask   = text_mask   .. "%d||%d\n"
 			-- items looted
 			text_header = text_header .. "Items looted:\n"
 			text_mask   = text_mask   .. "%d\n"
@@ -517,8 +522,8 @@ do
 		-- gold by item quality
 		if not disabled.quality then
 			for i=0,5 do -- gold by qualities (poor to legendary)
-				text_header = text_header .. format(" %s\n",FmtQuality(i));
-				text_mask   = text_mask   .. "(%d) %s\n"
+				text_header = text_header .. format(" %s\n",FmtQuality(i))
+				text_mask   = text_mask   .. "%s\n"
 			end
 		end
 		-- gold hour & total
@@ -543,27 +548,21 @@ do
 		local sSession = curtime - (session.startTime or curtime) + (session.duration or 0)
 		local m0, s0 = floor(sSession/60), sSession%60
 		local h0, m0 = floor(m0/60), m0%60
-		data[#data+1] = session.startTime and '|cFF00ff00' or '|cFFff0000'
+		data[#data+1] = (session.startTime and '|cFF00ff00') or (session.duration and '|cFFff8000') or '|cFFff0000'
 		data[#data+1] = h0
 		data[#data+1] = m0
 		data[#data+1] = s0
 		-- reset data
 		if not disabled.reset then
-			local timeLast  = #resets>0 and resets[#resets].time
-			local timeLock  = #resets>0 and resets[1].time+3600 or nil
-			local remain    = RESET_MAX-resets.count
-			local sReset    = (timeLast and curtime-timeLast) or 0
-			local sUnlock   = timeLock and timeLock-curtime or 0
-			-- resets
-			data[#data+1] = (remain>1 and '|cFF00ff00') or (remain==1 and '|cFFff8000') or '|cFFff0000'
+			local dirtyC   = resets.countd>0 and '|cFFff8000' or '|cFF00ff00'
+			local remain   = RESET_MAX-resets.count
+			local timeLock = #resets>0 and resets[1].time+3600 or nil
+			local sUnlock  = timeLock and timeLock-curtime or 0
+			-- resets remain
+			data[#data+1] = (remain>resets.countd and '|cFF00ff00') or (remain>0 and '|cFFff8000') or '|cFFff0000'
 			data[#data+1] = remain
-			data[#data+1] = resets.countd>0 and '|cFFff8000' or '|cFF00ff00'
-			data[#data+1] = floor(sReset/60)
-			data[#data+1] = sReset%60
-			-- locked
-			data[#data+1] = (remain==RESET_MAX and '|cFF00ff00') or (remain>0 and '|cFFff8000') or '|cFFff0000'
-			data[#data+1] = resets.count
-			data[#data+1] = remain<=0 and '|cFFff0000' or '|cFF00ff00'
+			-- unlock time if all resets are spent
+			data[#data+1] = (remain<=0 and '|cFFff0000') or dirtyC
 			data[#data+1] = floor(sUnlock/60)
 			data[#data+1] = sUnlock%60
 		end
@@ -580,7 +579,6 @@ do
 		data[#data+1] = FmtMoney(session.moneyItems)
 		if not disabled.quality then
 			for i=0,5 do
-				data[#data+1] = session.countByQuality[i] or 0
 				data[#data+1] = FmtMoney(session.moneyByQuality[i] or 0)
 			end
 		end
@@ -739,7 +737,7 @@ local PATTERN_RESET = '^'..INSTANCE_RESET_SUCCESS:gsub("([^%w])","%%%1"):gsub('%
 function addon:CHAT_MSG_SYSTEM(event,msg)
 	local zone = strmatch(msg,PATTERN_RESET)
 	if zone then
-		LockAdd(zone, true)
+		LockAddReset(zone)
 		if addon:IsVisible() then
 			RefreshText()
 		end
@@ -831,27 +829,26 @@ do
 		if zone and zone~='' then
 			local zoneKey = format("%s:%s",zone,tostring(inInstance))
 			if zoneKey ~= lastZoneKey or (not event) then -- no event => called from config
+				if inInstance and #resets>=RESET_MAX then -- locked but inside instance, means locked expired before estimated unlock time
+					LockDel(1)
+				end
 				curZoneName = zone
-				--if inInstance and #resets>=RESET_MAX then -- locked but inside instance, means locked expired before estimated unlock time
-				--	LockDel(1)
-				--end
 				if config.farmZones then
 					if config.farmZones[zone] then
 						if inInstance and lastZoneKey then
 							SessionStart()
-						else
-							RefreshText()
 						end
 						self:Show()
 					elseif not config.reloadUI then
 						SessionStop()
 						self:Hide()
 					end
-				elseif self:IsVisible() then
-					RefreshText()
 				end
 				if config.reloadUI then -- clear reloadUI flag if set
 					config.reloadUI = nil
+				end
+				if self:IsVisible() then
+					RefreshText()
 				end
 				lastZoneKey = zoneKey
 			end
@@ -881,8 +878,7 @@ function addon:COMBAT_LOG_EVENT_UNFILTERED()
 	local _, eventType,_,_,_,_,_,dstGUID,dstName,dstFlags = CombatLogGetCurrentEventInfo()
 	if eventType == 'UNIT_DIED' and band(dstFlags,COMBATLOG_OBJECT_CONTROL_NPC)~=0 then
 		if inInstance and not resets[curZoneName] then
-			-- register used instance
-			LockAdd(curZoneName)
+			LockAddInstance(curZoneName) -- register used instance
 			timer:Play()
 		end
 		if session.startTime then
@@ -1655,7 +1651,7 @@ do
 		{ text = 'Daily',              notCheckable = true, hasArrow = true, menuList = menuDaily },
 		{ text = 'Zones',              notCheckable = true, hasArrow = true, menuList = menuZone },
 		{ text = 'Totals',             notCheckable = true, hasArrow = true, value = 'total',   menuList = menuStats },
-		{ text = 'Locks&Resets',       notCheckable = true, hasArrow = true, menuList = menuResets },
+		{ text = 'Resets',             notCheckable = true, hasArrow = true, menuList = menuResets },
 		{ text = 'Settings',           notCheckable = true, isTitle = true },
 		{ text = 'Prices of Items', notCheckable = true, hasArrow = true, menuList = {
 			{ text = FmtQuality(0), value = 0, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
