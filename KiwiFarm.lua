@@ -942,6 +942,8 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	notify   = config.notify
 	disabled = config.disabled
 	collect  = config.collect
+	resets.count  = resets.count or 0
+	resets.countd = resets.countd or 0
 	-- remove old data from database
 	local key = date("%Y/%m/%d", time()-86400*7)
 	for k,v in next, config.daily do

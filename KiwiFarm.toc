@@ -2,7 +2,7 @@
 ## Interface: 80200
 #@end-retail@
 #@non-retail@
-# ## Interface: 11302
+# ## Interface: 11303
 #@end-non-retail@
 ## Title: |cFF7FFF72Kiwi|r Farm
 ## Notes: Reset & Gold Tracker
