@@ -643,7 +643,7 @@ local function SessionStop()
 	end
 end
 
--- session clear
+-- session finish
 local function SessionFinish()
 	if session.startTime or session.duration then
 		local curTime     = time()
@@ -998,6 +998,14 @@ SlashCmdList.KIWIFARM = function(args)
 		addon:Show()
 	elseif arg1 == 'hide' then
 		addon:Hide()
+	elseif arg1 == 'toggle' then
+		addon:SetShown( not addon:IsShown() )
+	elseif arg1 == 'start'  then
+		SessionStart()
+	elseif arg1 == 'stop' then
+		SessionStop()
+	elseif arg1 == 'finish' then
+		SessionFinish()
 	elseif arg1 == 'config' then
 		addon:ShowMenu()
 	elseif arg1 == 'minimap' then
@@ -1015,6 +1023,10 @@ SlashCmdList.KIWIFARM = function(args)
 		print("Commands:")
 		print("  /kfarm show     -- show main window")
 		print("  /kfarm hide     -- hide main window")
+		print("  /kfarm toggle   -- show/hide main window")
+		print("  /kfarm start    -- session start")
+		print("  /kfarm stop     -- session stop")
+		print("  /kfarm finish   -- session finish")
  		print("  /kfarm config   -- display config menu")
 		print("  /kfarm minimap  -- toggle minimap icon visibility")
 	end
