@@ -7,6 +7,9 @@ local addonName = ...
 -- main frame
 local addon = CreateFrame('Frame', "KiwiFarm", UIParent)
 
+-- locale
+local L = LibStub('AceLocale-3.0'):GetLocale('KiwiFarm', true)
+
 -- misc values
 local CLASSIC = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
 
@@ -15,10 +18,10 @@ local RESET_MAX = CLASSIC and 5 or 10
 local MARGIN = 4
 local COLOR_TRANSPARENT = { 0,0,0,0 }
 local FONTS = {
-	Arial = 'Fonts\\ARIALN.TTF',
-	FrizQT = 'Fonts\\FRIZQT__.TTF',
-	Morpheus = 'Fonts\\MORPHEUS.TTF',
-	Skurri = 'Fonts\\SKURRI.TTF',
+	Arial = L.Arial or 'Fonts\\ARIALN.TTF',
+	FrizQT = L.FrizQT or 'Fonts\\FRIZQT__.TTF',
+	Morpheus = L.Morpheus or 'Fonts\\MORPHEUS.TTF',
+	Skurri = L.Skurri or 'Fonts\\SKURRI.TTF',
 }
 local SOUNDS = CLASSIC and {
 	["Auction Window Open"] = "sound/interface/auctionwindowopen.ogg",
@@ -330,7 +333,7 @@ do
 		if itemLink then
 			return format("%s%sx%d %s", prefix, itemLink, quantity, FmtMoneyShort(money) )
 		else
-			return format("%sYou loot %s", prefix, FmtMoneyShort(money) )
+			return format(L["%sYou loot %s"], prefix, FmtMoneyShort(money) )
 		end
 	end
 	local notified = {}
@@ -343,7 +346,7 @@ do
 				local text = fmtLoot(itemLink, quantity, money)
 				CombatText_AddMessage(text, COMBAT_TEXT_SCROLL_FUNCTION, 1, 1, 1)
 			else
-				print('|cFF7FFF72KiwiFarm:|r Warning, Blizzard Floating Combat Text is not enabled, change the notifications setup or goto Interface Options>Combat to enable this feature.')
+				print(L['|cFF7FFF72KiwiFarm:|r Warning, Blizzard Floating Combat Text is not enabled, change the notifications setup or goto Interface Options>Combat to enable this feature.'])
 			end
 		end,
 		crit = function(itemLink, quantity, money)
@@ -351,7 +354,7 @@ do
 				local text = fmtLoot(itemLink, quantity, money)
 				CombatText_AddMessage(text, COMBAT_TEXT_SCROLL_FUNCTION, 1, 1, 1, 'crit')
 			else
-				print('|cFF7FFF72KiwiFarm:|r Warning, Blizzard Floating Combat Text is not enabled, change the notifications setup or goto Interface Options>Combat to enable this feature.')
+				print(L['|cFF7FFF72KiwiFarm:|r Warning, Blizzard Floating Combat Text is not enabled, change the notifications setup or goto Interface Options>Combat to enable this feature.'])
 			end
 		end,
 		msbt = function(itemLink, quantity, money)
@@ -359,7 +362,7 @@ do
 				local text = fmtLoot(itemLink, quantity, money)
 				MikSBT.DisplayMessage(text, MikSBT.DISPLAYTYPE_NOTIFICATION, false, 255, 255, 255)
 			else
-				print('|cFF7FFF72KiwiFarm:|r Warning, MikScrollingCombatText addon is not installed, change the notifications setup or install MSBT.')
+				print(L['|cFF7FFF72KiwiFarm:|r Warning, MikScrollingCombatText addon is not installed, change the notifications setup or install MSBT.'])
 			end
 		end,
 		sound = function(_, _, _, groupKey)
@@ -498,25 +501,25 @@ do
 	-- prepare text
 	function PrepareText()
 		-- header & session duration
-		text_header =              "|cFF7FFF72KiwiFarm:|r\nSession:\n"
+		text_header =              L["|cFF7FFF72KiwiFarm:|r\nSession:\n"]
 		text_mask   =	           "|cFF7FFF72%s|r\n"      -- zone
 		text_mask   = text_mask .. "%s%02d:%02d:%02d|r\n"  -- session duration
 		-- instance reset & lock info
 		if not disabled.reset then
-			text_header = text_header .. "Resets:\n"
+			text_header = text_header .. L["Resets:\n"]
 			text_mask   = text_mask   .. "%s%d|r||%s%02d:%02d|r\n"  -- last reset
 		end
 		-- count data
 		if not disabled.count then
 			-- mobs killed
-			text_header = text_header .. "Mobs killed:\n"
+			text_header = text_header .. L["Mobs killed:\n"]
 			text_mask   = text_mask   .. "%d||%d\n"
 			-- items looted
-			text_header = text_header .. "Items looted:\n"
+			text_header = text_header .. L["Items looted:\n"]
 			text_mask   = text_mask   .. "%d\n"
 		end
 		-- gold cash & items
-		text_header = text_header .. "Gold cash:\nGold items:\n"
+		text_header = text_header .. L["Gold cash:\nGold items:\n"]
 		text_mask   = text_mask   .. "%s\n"  -- money cash
 		text_mask   = text_mask   .. "%s\n"  -- money items
 		-- gold by item quality
@@ -527,7 +530,7 @@ do
 			end
 		end
 		-- gold hour & total
-		text_header = text_header .. "Gold/hour:\nGold total:"
+		text_header = text_header .. L["Gold/hour:\nGold total:"]
 		text_mask   = text_mask .. "%s\n" -- money per hour
 		text_mask   = text_mask .. "%s" -- money total
 		textl:SetText(text_header)
@@ -964,7 +967,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 		end,
 		OnTooltipShow = function(tooltip)
 			tooltip:AddDoubleLine("KiwiFarm", GetAddOnMetadata(addonName, "Version") )
-			tooltip:AddLine("|cFFff4040Left Click|r toggle window visibility\n|cFFff4040Right Click|r open config menu", 0.2, 1, 0.2)
+			tooltip:AddLine(L["|cFFff4040Left Click|r toggle window visibility\n|cFFff4040Right Click|r open config menu"], 0.2, 1, 0.2)
 		end,
 	}) , config.minimapIcon)
 	-- events
@@ -1222,7 +1225,7 @@ do
 		LayoutFrame()
 	end
 	local function getSessionText()
-		return (session.startTime and 'Session Pause') or (session.duration and 'Session Continue') or 'Session Start'
+		return (session.startTime and L['Session Pause']) or (session.duration and L['Session Continue']) or L['Session Start']
 	end
 	local function setSession()
 		if session.startTime then
@@ -1253,7 +1256,7 @@ do
 				for zone in pairs(config.farmZones or {}) do
 					menu[#menu+1] = { text = '(-)'..zone, value = zone, notCheckable = true, func = ZoneDel }
 				end
-				menu[#menu+1] = { text = '(+)Add Current Zone', notCheckable = true, func = ZoneAdd }
+				menu[#menu+1] = { text = L['(+)Add Current Zone'], notCheckable = true, func = ZoneAdd }
 			end
 		end	}
 	end
@@ -1264,7 +1267,7 @@ do
 		for _,reset in ipairs(resets) do
 			defMenuAdd(menu, format(reset.reseted and "%s - %s" or "|cFF808080%s - %s|r", date("%H:%M:%S",reset.time), reset.zone) )
 		end
-		defMenuEnd(menu, 'None')
+		defMenuEnd(menu, L['None'])
 	end	}
 
 	-- submenu: quality sources
@@ -1278,12 +1281,12 @@ do
 			sources[info.value] = (not sources[info.value]) or nil
 		end
 		menuQualitySources = {
-			{ text = 'Vendor Price',              value = 'vendor',                     isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = 'Auctionator: Market Value', value = 'Atr:DBMarket', arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = 'Auctionator: Disenchant',   value = 'Atr:Destroy' , arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = 'TSM4: Market Value',        value = 'DBMarket',     arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = 'TSM4: Min Buyout',          value = 'DBMinBuyout',  arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Vendor Price'],              value = 'vendor',                     isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Auctionator: Market Value'], value = 'Atr:DBMarket', arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Auctionator: Disenchant'],   value = 'Atr:Destroy' , arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['TSM4: Market Value'],        value = 'DBMarket',     arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['TSM4: Min Buyout'],          value = 'DBMinBuyout',  arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['TSM4: Disenchant'],          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
 			init = InitPriceSources
 		}
 	end
@@ -1311,7 +1314,7 @@ do
 				return
 			end
 			C_Timer.After(.1,function()
-				addon:ConfirmDialog( format("%s\nThis item has no defined price. Do you want to delete this item?",itemLink), function() deleteItem(itemLink) end)
+				addon:ConfirmDialog( format(L["%s\nThis item has no defined price. Do you want to delete this item?"],itemLink), function() deleteItem(itemLink) end)
 			end)
 		end
 		local function setItemPriceSource(info, itemLink, source, value)
@@ -1343,7 +1346,7 @@ do
 			local itemLink, empty = getMenuValue(info)
 			if info.value=='user' then
 				local price    = FmtMoneyPlain( getItemPriceSource(itemLink,'user') ) or ''
-				addon:EditDialog('|cFF7FFF72KiwiFarm|r\n Set a custom price for:\n' .. itemLink, price, function(v)
+				addon:EditDialog(L['|cFF7FFF72KiwiFarm|r\n Set a custom price for:\n'] .. itemLink, price, function(v)
 					setItemPriceSource(info, itemLink, 'user', String2Copper(v))
 				end)
 			else
@@ -1352,17 +1355,17 @@ do
 		end
 		local function getText(info, level)
 			local price = getItemPriceSource(getMenuValue(level),'user')
-			return format( 'Price: %s', price and FmtMoneyShort(price) or 'Not Defined')
+			return format( L['Price: %s'], price and FmtMoneyShort(price) or L['Not Defined'])
 		end
 		-- submenu: item price sources
 		menuItemSources = {
 			{ text = getText,	  				  value = 'user',         				isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = 'Vendor Price',              value = 'vendor',                     isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = 'Auctionator: Market Value', value = 'Atr:DBMarket', arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = 'Auctionator: Disenchant',   value = 'Atr:Destroy' , arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = 'TSM4: Market Value',        value = 'DBMarket',     arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = 'TSM4: Min Buyout',          value = 'DBMinBuyout',  arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = 'TSM4: Disenchant',          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Vendor Price'],              value = 'vendor',                     isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Auctionator: Market Value'], value = 'Atr:DBMarket', arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Auctionator: Disenchant'],   value = 'Atr:Destroy' , arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['TSM4: Market Value'],        value = 'DBMarket',     arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['TSM4: Min Buyout'],          value = 'DBMinBuyout',  arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['TSM4: Disenchant'],          value = 'Destroy',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
 			init = InitPriceSources,
 		}
 		-- submenu: individual items prices
@@ -1410,7 +1413,7 @@ do
 	do
 		local function getText(info)
 			local value = stats.killedMobs[info.value]
-			return value and format("%s: %d", info.value, value ) or 'None'
+			return value and format("%s: %d", info.value, value ) or L['None']
 		end
 		menuKilledMobs = {
 			init = function(menu)
@@ -1418,7 +1421,7 @@ do
 				for name, count in pairs(stats.killedMobs) do
 					defMenuAdd( menu, getText, name )
 				end
-				defMenuEnd(menu,'None')
+				defMenuEnd(menu,L['None'])
 				splitMenu(menu, 'value')
 			end
 		}
@@ -1485,7 +1488,7 @@ do
 			local groupKey = info.value
 			if type(groupKey) ~= 'number' then -- special cases ('price' and 'money' groups notifications require a minimum price/gold amount)
 				local price = notify[groupKey] and notify[groupKey][info.arg1]
-				return price and format("%s (+%s)", info.arg2, FmtMoneyShort(price)) or format("%s (click to set price)", info.arg2)
+				return price and format("%s (+%s)", info.arg2, FmtMoneyShort(price)) or format(L["%s (click to set price)"], info.arg2)
 			end
 			return info.arg2
 		end
@@ -1506,7 +1509,7 @@ do
 		local function setNotify(info)
 			if type(info.value) ~= 'number' then -- 'price' & 'money' groups
 				local price = notify[info.value] and notify[info.value][info.arg1]
-				addon:EditDialog('|cFF7FFF72KiwiFarm|r\nSet the minimum gold amount to display a notification. You can leave the field blank to remove the minimum gold.', FmtMoneyPlain(price), function(v)
+				addon:EditDialog(L['|cFF7FFF72KiwiFarm|r\nSet the minimum gold amount to display a notification. You can leave the field blank to remove the minimum gold.'], FmtMoneyPlain(price), function(v)
 					set(info, String2Copper(v) )
 					refreshMenu(info)
 				end)
@@ -1515,11 +1518,11 @@ do
 			end
 		end
 		menuNotify = {
-			{ text = initText, useParentValue = true, arg1 = 'chat',   arg2 = 'Chat Text',   		    isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
-			{ text = initText, useParentValue = true, arg1 = 'combat', arg2 = 'CombatText: Scroll',     isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
-			{ text = initText, useParentValue = true, arg1 = 'crit',   arg2 = 'CombatText: Crit',       isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
-			{ text = initText, useParentValue = true, arg1 = 'msbt',   arg2 = 'MSBT: Notification', 	isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
-			{ text = initText, useParentValue = true, arg1 = 'sound',  arg2 = 'Sound',       		    isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'chat',   arg2 = L['Chat Text'],   		    isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'combat', arg2 = L['CombatText: Scroll'],     isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'crit',   arg2 = L['CombatText: Crit'],       isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'msbt',   arg2 = L['MSBT: Notification'], 	isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'sound',  arg2 = L['Sound'],       		    isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
 			init = function(menu, level)
 				local groupKey = getMenuValue(level)
 				local value = notify[groupKey] and notify[groupKey].sound
@@ -1547,20 +1550,20 @@ do
 
 	-- submenu: stats maintenance
 	local menuStatsMisc = {
-		{ text = 'Clear looted items',  disabled = function() return not next(stats.lootedItems) end, notCheckable = true, func = function()
-			addon:ConfirmDialog( "Are you sure you want to delete all looted items stored in this section ?", function()
+		{ text = L['Clear looted items'],  disabled = function() return not next(stats.lootedItems) end, notCheckable = true, func = function()
+			addon:ConfirmDialog( L["Are you sure you want to delete all looted items stored in this section ?"], function()
 				wipe(stats.lootedItems)
 				timeLootedItems = time()
 			end)
 		end	},
-		{ text = 'Clear killed mobs',  disabled = function() return not next(stats.killedMobs) end, notCheckable = true, func = function()
-			addon:ConfirmDialog( "Are you sure you want to delete all killed mobs stored in this section ?", function()
+		{ text = L['Clear killed mobs'],  disabled = function() return not next(stats.killedMobs) end, notCheckable = true, func = function()
+			addon:ConfirmDialog( L["Are you sure you want to delete all killed mobs stored in this section ?"], function()
 				wipe(stats.killedMobs)
 			end)
 		end	},
-		{ text = 'Clear all data', notCheckable = true, func = function()
+		{ text = L['Clear all data'], notCheckable = true, func = function()
 			local stats = stats
-			addon:ConfirmDialog( "Are you sure you want to delete all data in this section ?", function()
+			addon:ConfirmDialog( L["Are you sure you want to delete all data in this section ?"], function()
 				if stats._type then
 					config[stats._type][stats._key] = nil  -- zone & daily
 				else
@@ -1578,9 +1581,9 @@ do
 		{ notCheckable = true },
 		{ notCheckable = true },
 		{ notCheckable = true },
-		{ text = 'Looted Items', notCheckable = true, hasArrow = true, menuList = menuGoldQuality },
-		{ text = 'Killed Mobs',  notCheckable = true, hasArrow = true, menuList = menuKilledMobs  },
-		{ text = 'Maintenance',  notCheckable = true, hasArrow = true, menuList = menuStatsMisc   },
+		{ text = L['Looted Items'], notCheckable = true, hasArrow = true, menuList = menuGoldQuality },
+		{ text = L['Killed Mobs'],  notCheckable = true, hasArrow = true, menuList = menuKilledMobs  },
+		{ text = L['Maintenance'],  notCheckable = true, hasArrow = true, menuList = menuStatsMisc   },
 		init = function(menu,level)
 			local curTime = time()
 			local field = getMenuValue(level)
@@ -1589,13 +1592,13 @@ do
 			local duration = curTime - (stats.startTime or curTime) + (stats.duration or 0)
 			local mhour = duration>0 and floor(money*3600/duration) or 0
 			local ftime = (stats.duration or 0) + curTime - (stats.startTime or curTime)
-			menu[1].text = format("Farm Time: %s", FmtDuration(ftime))
-			menu[2].text = format("Gold cash: %s", FmtMoney(stats.moneyCash))
-			menu[3].text = format("Gold items: %s", FmtMoney(stats.moneyItems))
-			menu[4].text = format("Gold/hour: %s", FmtMoney(mhour))
-			menu[5].text = format("Gold total: %s", FmtMoney(money))
-			menu[6].text = format("Items looted (%d)", stats.countItems)
-			menu[7].text = format("Mobs killed (%d)", stats.countMobs)
+			menu[1].text = format(L["Farm Time: %s"], FmtDuration(ftime))
+			menu[2].text = format(L["Gold cash: %s"], FmtMoney(stats.moneyCash))
+			menu[3].text = format(L["Gold items: %s"], FmtMoney(stats.moneyItems))
+			menu[4].text = format(L["Gold/hour: %s"], FmtMoney(mhour))
+			menu[5].text = format(L["Gold total: %s"], FmtMoney(money))
+			menu[6].text = format(L["Items looted (%d)"], stats.countItems)
+			menu[7].text = format(L["Mobs killed (%d)"], stats.countMobs)
 			timeLootedItems = curTime
 		end,
 	}
@@ -1605,7 +1608,7 @@ do
 		defMenuStart(menu)
 		local tim, pre, key = time()
 		for i=1,7 do
-			key, pre = date("%Y/%m/%d", tim), pre and date("%m/%d", tim) or 'Today'
+			key, pre = date("%Y/%m/%d", tim), pre and date("%m/%d", tim) or L['Today']
 			local data = config.daily[key]
 			if data then
 				local money = data and data.moneyCash+data.moneyItems or 0
@@ -1615,7 +1618,7 @@ do
 			end
 			tim = tim - 86400
 		end
-		defMenuEnd(menu, 'None')
+		defMenuEnd(menu, L['None'])
 		while #menu>1 and menu[#menu].value==nil do
 			tremove(menu)
 		end
@@ -1628,7 +1631,7 @@ do
 			for zoneName, data in pairs(config.zone) do
 				defMenuAdd(menu, zoneName, data, menuStats)
 			end
-			defMenuEnd(menu, 'None')
+			defMenuEnd(menu, L['None'])
 		end
 	}
 
@@ -1642,96 +1645,96 @@ do
 			collect[info.value][info.arg1] = not collect[info.value][info.arg1] or nil
 		end
 		menuCollect = {
-			{ text = 'Total Stats', notCheckable = true, isTitle = true},
-			{ text = 'Detailed mobs info',  value = 'total', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
-			{ text = 'Detailed items info', value = 'total', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
-			{ text = 'Daily Stats',  notCheckable = true, isTitle = true},
-			{ text = 'Detailed mobs info',  value = 'daily', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
-			{ text = 'Detailed items info', value = 'daily', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
-			{ text = 'Zone Stats',   notCheckable = true, isTitle = true},
-			{ text = 'Detailed mobs info',  value = 'zone',  arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
-			{ text = 'Detailed items info', value = 'zone',  arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = L['Total Stats'], notCheckable = true, isTitle = true},
+			{ text = L['Detailed mobs info'],  value = 'total', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = L['Detailed items info'], value = 'total', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = L['Daily Stats'],  notCheckable = true, isTitle = true},
+			{ text = L['Detailed mobs info'],  value = 'daily', arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = L['Detailed items info'], value = 'daily', arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = L['Zone Stats'],   notCheckable = true, isTitle = true},
+			{ text = L['Detailed mobs info'],  value = 'zone',  arg1 = 'killedMobs',  keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = L['Detailed items info'], value = 'zone',  arg1 = 'lootedItems', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
 		}
 	end
 
 	-- menu: main
 	local menuMain = {
-		{ text = 'Kiwi Farm [/kfarm]', notCheckable = true, isTitle = true },
+		{ text = L['Kiwi Farm [/kfarm]'], notCheckable = true, isTitle = true },
 		{ text = getSessionText,       notCheckable = true, func = setSession },
-		{ text = 'Session Finish',     notCheckable = true, disabled = function() return not (session.startTime or session.duration) end, func = SessionFinish },
-		{ text = 'Reset Instances',    notCheckable = true, func = ResetInstances },
-		{ text = 'Statistics',         notCheckable = true, isTitle = true },
-		{ text = 'Session',            notCheckable = true, hasArrow = true, value = 'session', menuList = menuStats },
-		{ text = 'Daily',              notCheckable = true, hasArrow = true, menuList = menuDaily },
-		{ text = 'Zones',              notCheckable = true, hasArrow = true, menuList = menuZone },
-		{ text = 'Totals',             notCheckable = true, hasArrow = true, value = 'total',   menuList = menuStats },
-		{ text = 'Resets',             notCheckable = true, hasArrow = true, menuList = menuResets },
-		{ text = 'Settings',           notCheckable = true, isTitle = true },
-		{ text = 'Prices of Items', notCheckable = true, hasArrow = true, menuList = {
+		{ text = L['Session Finish'],     notCheckable = true, disabled = function() return not (session.startTime or session.duration) end, func = SessionFinish },
+		{ text = L['Reset Instances'],    notCheckable = true, func = ResetInstances },
+		{ text = L['Statistics'],         notCheckable = true, isTitle = true },
+		{ text = L['Session'],            notCheckable = true, hasArrow = true, value = 'session', menuList = menuStats },
+		{ text = L['Daily'],              notCheckable = true, hasArrow = true, menuList = menuDaily },
+		{ text = L['Zones'],              notCheckable = true, hasArrow = true, menuList = menuZone },
+		{ text = L['Totals'],             notCheckable = true, hasArrow = true, value = 'total',   menuList = menuStats },
+		{ text = L['Resets'],             notCheckable = true, hasArrow = true, menuList = menuResets },
+		{ text = L['Settings'],           notCheckable = true, isTitle = true },
+		{ text = L['Prices of Items'], notCheckable = true, hasArrow = true, menuList = {
 			{ text = FmtQuality(0), value = 0, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 			{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 			{ text = FmtQuality(2), value = 2, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 			{ text = FmtQuality(3), value = 3, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 			{ text = FmtQuality(4), value = 4, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 			{ text = FmtQuality(5), value = 5, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
-			{ text = 'Specific Items', notCheckable= true, hasArrow = true, value = 'specific', menuList = menuPriceItems },
-			{ text = 'Ignore enchanting mats', isNotRadio = true, keepShownOnClick = 1,
+			{ text = L['Specific Items'], notCheckable= true, hasArrow = true, value = 'specific', menuList = menuPriceItems },
+			{ text = L['Ignore enchanting mats'], isNotRadio = true, keepShownOnClick = 1,
 				checked = function() return config.ignoreEnchantingMats; end,
 				func = function() config.ignoreEnchantingMats = not config.ignoreEnchantingMats or nil; end
 			},
 		} },
-		{ text = 'Notifications', notCheckable = true, hasArrow = true, menuList = {
+		{ text = L['Notifications'], notCheckable = true, hasArrow = true, menuList = {
 			{ text = FmtQuality(0),  value = 0, notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = FmtQuality(1),  value = 1, notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = FmtQuality(2),  value = 2, notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = FmtQuality(3),  value = 3, notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = FmtQuality(4),  value = 4, notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = FmtQuality(5),  value = 5, notCheckable = true, hasArrow = true, menuList = menuNotify },
-			{ text = 'All Items looted', value = 'price', notCheckable = true, hasArrow = true, menuList = menuNotify },
-			{ text = 'Money looted', value = 'money', notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = L['All Items looted'], value = 'price', notCheckable = true, hasArrow = true, menuList = menuNotify },
+			{ text = L['Money looted'], value = 'money', notCheckable = true, hasArrow = true, menuList = menuNotify },
 		} },
-		{ text = 'Miscellaneous', notCheckable= true, hasArrow = true, menuList = {
-			{ text = 'Display Info', notCheckable= true, hasArrow = true, menuList = {
-				{ text = 'Lock&Resets',      value = 'reset',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
-				{ text = 'Mobs&Items Count', value = 'count',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
-				{ text = 'Gold by Quality',  value = 'quality', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+		{ text = L['Miscellaneous'], notCheckable= true, hasArrow = true, menuList = {
+			{ text = L['Display Info'], notCheckable= true, hasArrow = true, menuList = {
+				{ text = L['Lock&Resets'],      value = 'reset',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+				{ text = L['Mobs&Items Count'], value = 'count',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+				{ text = L['Gold by Quality'],  value = 'quality', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 			} },
-			{ text = 'Money Format', notCheckable = true, hasArrow = true, menuList = {
+			{ text = L['Money Format'], notCheckable = true, hasArrow = true, menuList = {
 				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r 99|cffeda55fc|r', value = '', 							    checked = MoneyFmtChecked, func = SetMoneyFmt },
 				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 				 value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
 				{ text = '999|cffffd70ag|r', 								 value = '%d|cffffd70ag|r', 				checked = MoneyFmtChecked, func = SetMoneyFmt },
 			} },
-			{ text = 'Data Collection', notCheckable= true, hasArrow = true, menuList = menuCollect },
-			{ text = 'Farming Zones',   notCheckable= true, hasArrow = true, menuList = menuZones },
+			{ text = L['Data Collection'], notCheckable= true, hasArrow = true, menuList = menuCollect },
+			{ text = L['Farming Zones'],   notCheckable= true, hasArrow = true, menuList = menuZones },
 		} },
-		{ text = 'Appearance', notCheckable= true, hasArrow = true, menuList = {
-			{ text = 'Frame Anchor', notCheckable= true, hasArrow = true, menuList = {
-				{ text = 'Top Left',     value = 'TOPLEFT',     checked = AnchorChecked, func = SetAnchor },
-				{ text = 'Top Right',    value = 'TOPRIGHT',    checked = AnchorChecked, func = SetAnchor },
-				{ text = 'Bottom Left',  value = 'BOTTOMLEFT',  checked = AnchorChecked, func = SetAnchor },
-				{ text = 'Bottom Right', value = 'BOTTOMRIGHT', checked = AnchorChecked, func = SetAnchor },
-				{ text = 'Left',   		 value = 'LEFT',   		checked = AnchorChecked, func = SetAnchor },
-				{ text = 'Right',  		 value = 'RIGHT',  		checked = AnchorChecked, func = SetAnchor },
-				{ text = 'Top',    		 value = 'TOP',    		checked = AnchorChecked, func = SetAnchor },
-				{ text = 'Bottom', 		 value = 'BOTTOM', 		checked = AnchorChecked, func = SetAnchor },
-				{ text = 'Center', 		 value = 'CENTER', 		checked = AnchorChecked, func = SetAnchor },
+		{ text = L['Appearance'], notCheckable= true, hasArrow = true, menuList = {
+			{ text = L['Frame Anchor'], notCheckable= true, hasArrow = true, menuList = {
+				{ text = L['Top Left'],     value = 'TOPLEFT',     checked = AnchorChecked, func = SetAnchor },
+				{ text = L['Top Right'],    value = 'TOPRIGHT',    checked = AnchorChecked, func = SetAnchor },
+				{ text = L['Bottom Left'],  value = 'BOTTOMLEFT',  checked = AnchorChecked, func = SetAnchor },
+				{ text = L['Bottom Right'], value = 'BOTTOMRIGHT', checked = AnchorChecked, func = SetAnchor },
+				{ text = L['Left'],   		 value = 'LEFT',   		checked = AnchorChecked, func = SetAnchor },
+				{ text = L['Right'],  		 value = 'RIGHT',  		checked = AnchorChecked, func = SetAnchor },
+				{ text = L['Top'],    		 value = 'TOP',    		checked = AnchorChecked, func = SetAnchor },
+				{ text = L['Bottom'], 		 value = 'BOTTOM', 		checked = AnchorChecked, func = SetAnchor },
+				{ text = L['Center'], 		 value = 'CENTER', 		checked = AnchorChecked, func = SetAnchor },
 			} },
-			{ text = 'Frame Width', notCheckable= true, hasArrow = true, menuList = {
-				{ text = 'Increase(+)',   value =  1,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
-				{ text = 'Decrease(-)',   value = -1,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
-				{ text = 'Default',       value =  0,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
+			{ text = L['Frame Width'], notCheckable= true, hasArrow = true, menuList = {
+				{ text = L['Increase(+)'],   value =  1,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
+				{ text = L['Decrease(-)'],   value = -1,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
+				{ text = L['Default'],       value =  0,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
 			} },
-			{ text = 'Text Font', notCheckable= true, hasArrow = true, menuList = menuFonts },
-			{ text = 'Text Size', notCheckable= true, hasArrow = true, menuList = {
-				{ text = 'Increase(+)',  value =  1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
-				{ text = 'Decrease(-)',  value = -1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
-				{ text = 'Default (14)', value =  0,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
+			{ text = L['Text Font'], notCheckable= true, hasArrow = true, menuList = menuFonts },
+			{ text = L['Text Size'], notCheckable= true, hasArrow = true, menuList = {
+				{ text = L['Increase(+)'],  value =  1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
+				{ text = L['Decrease(-)'],  value = -1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
+				{ text = L['Default (14)'], value =  0,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 			} },
-			{ text ='Background color ', notCheckable = true, hasColorSwatch = true, hasOpacity = true,
+			{ text =L['Background color '], notCheckable = true, hasColorSwatch = true, hasOpacity = true,
 				get = function() return unpack(config.backColor) end,
 				set = function(info, ...) config.backColor = {...}; SetBackground(); end,
 			},
-			{ text = 'Hide Window', notCheckable = true, func = function() addon:Hide() end },
+			{ text = L['Hide Window'], notCheckable = true, func = function() addon:Hide() end },
 		} },
 	}
 
