@@ -1,13 +1,6 @@
 ---@class KiwiFarmLocale
 local L = LibStub('AceLocale-3.0'):NewLocale('KiwiFarm', 'zhCN', false, true)
-if not L then
-    return
-end
-
-L.Arial = 'Fonts\\ARHei.TTF'
-L.FrizQT = 'Fonts\\ARHei.TTF'
-L.Morpheus = 'Fonts\\ARHei.TTF'
-L.Skurri = 'Fonts\\ARHei.TTF'
+if not L then return end
 
 L['%sYou loot %s'] = '%s你拾取了 %s'
 L['|cFF7FFF72KiwiFarm:|r Warning, Blizzard Floating Combat Text is not enabled, change the notifications setup or goto Interface Options>Combat to enable this feature.'] = '|cFF7FFF72KiwiFarm:|r 未启用浮动战斗信息，请修改设置或者开启战斗文字功能（ESC-界面设置-战斗）'

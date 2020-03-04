@@ -17,11 +17,16 @@ local CLASSIC = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
 local RESET_MAX = CLASSIC and 5 or 10
 local MARGIN = 4
 local COLOR_TRANSPARENT = { 0,0,0,0 }
-local FONTS = {
-	Arial = L.Arial or 'Fonts\\ARIALN.TTF',
-	FrizQT = L.FrizQT or 'Fonts\\FRIZQT__.TTF',
-	Morpheus = L.Morpheus or 'Fonts\\MORPHEUS.TTF',
-	Skurri = L.Skurri or 'Fonts\\SKURRI.TTF',
+local FONTS = (GetLocale() == 'zhCN') and {
+	Arial = 'Fonts\\ARHei.TTF',
+	FrizQT = 'Fonts\\ARHei.TTF',
+	Morpheus = 'Fonts\\ARHei.TTF',
+	Skurri = 'Fonts\\ARHei.TTF',
+} or {
+	Arial = 'Fonts\\ARIALN.TTF',
+	FrizQT = 'Fonts\\FRIZQT__.TTF',
+	Morpheus = 'Fonts\\MORPHEUS.TTF',
+	Skurri = 'Fonts\\SKURRI.TTF',
 }
 local SOUNDS = CLASSIC and {
 	["Auction Window Open"] = "sound/interface/auctionwindowopen.ogg",
