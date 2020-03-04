@@ -14,5 +14,8 @@
 
 Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
 Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+Libs\AceLocale-3.0\AceLocale-3.0.xml
+
+Localization\Localization.xml
 
 KiwiFarm.lua
