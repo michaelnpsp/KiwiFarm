@@ -741,9 +741,11 @@ addon:SetScript("OnMouseUp", function(self, button)
 end)
 
 -- track reset instance event
+-- in classic the game displays a reset failed message so we assume the reset was sucesfully in this case (github ticket #3).
 local PATTERN_RESET = '^'..INSTANCE_RESET_SUCCESS:gsub("([^%w])","%%%1"):gsub('%%%%s','(.+)')..'$'
+local PATTERN_RESET_FAILED = '^'..INSTANCE_RESET_FAILED:gsub("([^%w])","%%%1"):gsub('%%%%s','(.+)')..'$'
 function addon:CHAT_MSG_SYSTEM(event,msg)
-	local zone = strmatch(msg,PATTERN_RESET)
+	local zone = strmatch(msg,PATTERN_RESET) or ( CLASSIC and strmatch(msg,PATTERN_RESET_FAILED) )
 	if zone then
 		LockAddReset(zone)
 		if addon:IsVisible() then
