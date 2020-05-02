@@ -83,6 +83,8 @@ local DEFAULT = {
 	collect = { total = {}, daily = {}, zone = {} },
 	-- instances locks&resets
 	resets 	= { count = 0, countd = 0 },
+	-- reset chat notification
+	resetsNotify = { },
 	-- prices
 	priceByItem = {},
 	priceByQuality = { [0]={vendor=true}, [1]={vendor=true}, [2]={vendor=true}, [3]={vendor=true}, [4]={vendor=true}, [5]={vendor=true} },
@@ -330,7 +332,28 @@ end
 -- addon specific functions
 -- ============================================================================
 
--- notification funcions
+-- send message to group
+local function SendMessageToHomeGroup()
+	local cfg = config.resetsNotify
+	if cfg.message and IsInGroup(LE_PARTY_CATEGORY_HOME) then
+		local channel
+		if IsInRaid(LE_PARTY_CATEGORY_HOME) then
+			if cfg['RAID_WARNING'] and not IsInGroup(LE_PARTY_CATEGORY_INSTANCE) then
+				channel = (select(2, GetRaidRosterInfo(UnitInRaid("player") or 1)))>0 and 'RAID_WARNING'
+			end
+			if not channel then
+				channel = cfg['RAID'] and 'RAID'
+			end
+		else
+			channel = cfg['PARTY'] and 'PARTY'
+		end
+		if channel then
+			SendChatMessage(cfg.message, channel)
+		end
+	end
+end
+
+-- notification functions
 local Notify, NotifyEnd
 do
 	local function fmtLoot(itemLink, quantity, money, pref )
@@ -751,6 +774,7 @@ function addon:CHAT_MSG_SYSTEM(event,msg)
 		if addon:IsVisible() then
 			RefreshText()
 		end
+		SendMessageToHomeGroup()
 	end
 end
 
@@ -1366,7 +1390,7 @@ do
 		end
 		-- submenu: item price sources
 		menuItemSources = {
-			{ text = getText,	  				  value = 'user',         				isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = getText,	  				     value = 'user',         			   isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
 			{ text = L['Vendor Price'],              value = 'vendor',                     isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
 			{ text = L['Auctionator: Market Value'], value = 'Atr:DBMarket', arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
 			{ text = L['Auctionator: Disenchant'],   value = 'Atr:Destroy' , arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
@@ -1664,6 +1688,34 @@ do
 		}
 	end
 
+	-- submenu: reset notification
+	local menuResetNotify
+	do
+		local function checked(info)
+			return config.resetsNotify[info.value]
+		end
+		local function set(info)
+			config.resetsNotify[info.value] = (not config.resetsNotify[info.value]) or nil
+		end
+		local function setMessage(info)
+			addon:EditDialog(L['|cFF7FFF72KiwiFarm|r\nSet a message to send to your party or raid when instances are reset. You can leave the field blank to disable the notification.'],
+				config.resetsNotify.message,
+				function(v) config.resetsNotify.message = strtrim(v)~='' and v or nil; end
+			)
+		end
+		menuResetNotify = {
+			{ text = L['Reset Message'],  notCheckable = true, isTitle = true},
+			{ text = '', notCheckable = true, func = setMessage },
+			{ text = L['Notification Channels'], notCheckable = true, isTitle = true},
+			{ text = L['Party'],        value = 'PARTY',        keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = L['Raid'],         value = 'RAID',         keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			{ text = L['Raid Warning'], value = 'RAID_WARNING', keepShownOnClick = 1, isNotRadio = true, checked = checked, func = set },
+			init = function(menu)
+				menu[2].text = config.resetsNotify.message or L['(click to set)']
+			end,
+		}
+	end
+
 	-- menu: main
 	local menuMain = {
 		{ text = L['Kiwi Farm [/kfarm]'], notCheckable = true, isTitle = true },
@@ -1713,6 +1765,7 @@ do
 			} },
 			{ text = L['Data Collection'], notCheckable= true, hasArrow = true, menuList = menuCollect },
 			{ text = L['Farming Zones'],   notCheckable= true, hasArrow = true, menuList = menuZones },
+			{ text = L['Reset Notification'],   notCheckable= true, hasArrow = true, menuList = menuResetNotify },
 		} },
 		{ text = L['Appearance'], notCheckable= true, hasArrow = true, menuList = {
 			{ text = L['Frame Anchor'], notCheckable= true, hasArrow = true, menuList = {
