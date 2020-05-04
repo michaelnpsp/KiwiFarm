@@ -667,6 +667,7 @@ local function SessionStop()
 		local curTime = time()
 		session.duration = (session.duration or 0) + (curTime - (session.startTime or curTime))
 		session.startTime = nil
+		session.endTime = curTime
 		addon:UnregisterEvent("PLAYER_REGEN_DISABLED")
 		addon:UnregisterEvent("PLAYER_REGEN_ENABLED")
 		addon:UnregisterEvent("CHAT_MSG_LOOT")
@@ -681,6 +682,7 @@ local function SessionFinish()
 		local zoneName    = session.zoneName or curZoneName
 		session.duration  = (session.duration or 0) + (curTime - (session.startTime or curTime))
 		session.startTime = nil
+		session.endTime   = nil
 		session.zoneName  = nil
 		if session.moneyCash>0 or session.moneyItems>0 or session.countItems>0 or session.countMobs>0 then
 			AddDB(config.total, session, collect.total)
@@ -869,7 +871,7 @@ do
 				curZoneName = zone
 				if config.farmZones then
 					if config.farmZones[zone] then
-						if inInstance and lastZoneKey then
+						if inInstance and (lastZoneKey or time()-(session.endTime or 0)<300) then -- continue session if logout was less than 5 minutes
 							SessionStart()
 						end
 						self:Show()
