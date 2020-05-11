@@ -1,7 +1,7 @@
 local L = LibStub('AceLocale-3.0'):NewLocale('KiwiFarm', 'esES', false, true)
 if not L then return end
 
-L['%sYou loot %s'] = '%s???? %s'
+L['%sYou loot %s'] = '%sDespojas %s'
 L['|cFF7FFF72KiwiFarm:|r Warning, Blizzard Floating Combat Text is not enabled, change the notifications setup or goto Interface Options>Combat to enable this feature.'] = '|cFF7FFF72KiwiFarm:|r Atención, el Texto de Combate de Blizzard no está activado, cambie los ajustes de notificaciones o active esta característica en Opciones de interface>Combate.'
 L['|cFF7FFF72KiwiFarm:|r Warning, MikScrollingCombatText addon is not installed, change the notifications setup or install MSBT.'] = '|cFF7FFF72KiwiFarm:|r Atención, el addon MikScrollingCombatText no está instalado, cambie los ajustes de notificaciones o instale el addon MSBT.'
 L['|cFF7FFF72KiwiFarm:|r\nSession:\n'] = '|cFF7FFF72KiwiFarm:|r\nSesión:\n'

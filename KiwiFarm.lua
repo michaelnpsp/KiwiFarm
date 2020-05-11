@@ -447,8 +447,8 @@ do
 			price = Atr_GetAuctionPrice(name)
 		elseif source == 'Atr:Destroy' and ItemUpgradeInfo then -- Auctionator: disenchant
 			price = Atr_CalcDisenchantPrice(class, rarity, ItemUpgradeInfo:GetUpgradedItemLevel(itemLink)) -- Atr_GetDisenchantValue() is bugged cannot be used
-		elseif TSMAPI_FOUR then -- TSM4 sources
-			price = TSMAPI_FOUR.CustomPrice.GetValue(source, "i:"..itemID)
+		elseif TSMAPI_FOUR and TSM_API and TSM_API.GetCustomPriceValue then -- TSM4 sources
+			price = TSM_API.GetCustomPriceValue(source, "i:"..itemID)
 		end
 		return price or 0
 	end
