@@ -824,12 +824,13 @@ end
 
 -- looted gold
 do
+	local pattern = GetLocale()=='ruRU' and '%d+ ' or '%d+' -- space added for russian language because there are a |4 prefix in copper/silver/gold russian text
 	local digits = {}
-	local func = function(n) digits[#digits+1]=n end
+	local func = function(n) digits[#digits+1]=tonumber(n) end	
 	function addon:CHAT_MSG_MONEY(event,msg)
 		if session.startTime then
 			wipe(digits)
-			gsub(msg,"%d+",func)
+			gsub(msg,pattern,func)
 			local money = digits[#digits] + (digits[#digits-1] or 0)*100 + (digits[#digits-2] or 0)*10000
 			session.moneyCash = session.moneyCash + money
 			-- register zone if necessary
