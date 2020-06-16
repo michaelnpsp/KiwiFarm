@@ -297,6 +297,14 @@ local function String2Copper(str)
 	end
 end
 
+-- fonts
+local function SetTextFont(widget, name, size, flags)
+	widget:SetFont(name or FONTS.Arial or STANDARD_TEXT_FONT, size or 14, flags or 'OUTLINE')
+	if not widget:GetFont() then
+		widget:SetFont(STANDARD_TEXT_FONT, size or 14, flags or 'OUTLINE')
+	end
+end
+
 -- dialogs
 do
 	local DUMMY = function() end
@@ -733,7 +741,7 @@ local function LayoutFrame()
 	textl:SetPoint('TOPLEFT', MARGIN, -MARGIN)
 	textl:SetJustifyH('LEFT')
 	textl:SetJustifyV('TOP')
-	textl:SetFont(config.fontName or FONTS.Arial or STANDARD_TEXT_FONT, config.fontSize or 14, 'OUTLINE')
+	SetTextFont(textl, config.fontName, config.fontSize, 'OUTLINE')
 	PrepareText()
 	-- text right
 	textr:ClearAllPoints()
@@ -741,7 +749,7 @@ local function LayoutFrame()
 	textr:SetPoint('TOPLEFT', MARGIN, -MARGIN)
 	textr:SetJustifyH('RIGHT')
 	textr:SetJustifyV('TOP')
-	textr:SetFont(config.fontName or FONTS.Arial or STANDARD_TEXT_FONT, config.fontSize or 14, 'OUTLINE')
+	SetTextFont(textr, config.fontName, config.fontSize, 'OUTLINE')
 	RefreshText()
 	-- delayed frame sizing, because textl:GetHeight() returns incorrect height on first login for some fonts.
 	addon:SetScript("OnUpdate", UpdateFrameSize)
@@ -826,7 +834,7 @@ end
 do
 	local pattern = GetLocale()=='ruRU' and '%d+ ' or '%d+' -- space added for russian language because there are a |4 prefix in copper/silver/gold russian text
 	local digits = {}
-	local func = function(n) digits[#digits+1]=tonumber(n) end	
+	local func = function(n) digits[#digits+1]=tonumber(n) end
 	function addon:CHAT_MSG_MONEY(event,msg)
 		if session.startTime then
 			wipe(digits)
