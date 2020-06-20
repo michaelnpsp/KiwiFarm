@@ -15,6 +15,7 @@ local CLASSIC = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
 
 -- default values
 local RESET_MAX = CLASSIC and 5 or 10
+local RESET_DAY = 30
 local MARGIN = 4
 local COLOR_TRANSPARENT = { 0,0,0,0 }
 local FONTS = (GetLocale() == 'zhCN') and {
@@ -82,7 +83,8 @@ local DEFAULT = {
 	-- fields blacklists
 	collect = { total = {}, daily = {}, zone = {} },
 	-- instances locks&resets
-	resets 	= { count = 0, countd = 0 },
+	resets 	= { count = 0, countd = 0 }, -- hourly resets
+	resetsd = {},  -- daily resets (only for classic)
 	-- reset chat notification
 	resetsNotify = { },
 	-- prices
@@ -137,6 +139,7 @@ local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
 local config   -- database realm table
 local session  -- config.session
 local resets   -- config.resets     instance resets table
+local resetsd  -- config.resetsd
 local disabled -- config.disabled   texts table
 local notify   -- config.notify     notifications table
 local collect  -- config.collect
@@ -483,6 +486,9 @@ do
 	-- register instance reset
 	function LockAddReset(zone)
 		local ctime = time()
+		if CLASSIC then
+			resetsd[#resetsd+1] = ctime -- classic to track 30/24h limit
+		end
 		resets.count = resets.count + 1
 		for i=#resets,1,-1 do
 			if resets[i].zone==zone and not resets[i].reseted then
@@ -522,6 +528,9 @@ do
 				resets.count = resets.count + 1
 				resets[ resets[i].zone ] = nil
 				resets.countd = resets.countd - 1
+				if CLASSIC then
+					resetsd[#resetsd+1] = ctime -- classic to track 30/24h limit
+				end
 			end
 			i = i - 1
 		end
@@ -543,7 +552,11 @@ do
 		-- instance reset & lock info
 		if not disabled.reset then
 			text_header = text_header .. L["Resets:\n"]
-			text_mask   = text_mask   .. "%s%d|r||%s%02d:%02d|r\n"  -- last reset
+			if CLASSIC then
+				text_mask   = text_mask .. "%s%d|r||%s%d|r||%s%02d:%02d|r\n"  -- last reset
+			else
+				text_mask   = text_mask .. "%s%d|r||%s%02d:%02d|r\n"  -- last reset
+			end
 		end
 		-- count data
 		if not disabled.count then
@@ -574,10 +587,16 @@ do
 	-- refresh text
 	function RefreshText()
 		local curtime = time()
-		local exptime = curtime - 3600
 		-- delete old data
+		local exptime = curtime - 3600
 		while (#resets>0 and resets[1].time<exptime) or #resets>RESET_MAX do -- remove old resets(>1hour)
 			LockDel(1)
+		end
+		if CLASSIC then
+			local exptime = curtime - 86400
+			while (#resetsd>0 and resetsd[1]<exptime) or #resets>RESET_DAY do -- remove old daily resets for classic (>24hour)
+				tremove(resetsd,1)
+			end
 		end
 		-- reset old data
 		wipe(data)
@@ -597,6 +616,11 @@ do
 			local remain   = RESET_MAX-resets.count
 			local timeLock = #resets>0 and resets[1].time+3600 or nil
 			local sUnlock  = timeLock and timeLock-curtime or 0
+			if CLASSIC then
+				local remaind = math.max( RESET_DAY - #resetsd, 0 )
+				data[#data+1] = (remaind>5 and '|cFF00ff00') or (remaind>0 and '|cFFff8000') or '|cFFff0000'
+				data[#data+1] =  remaind
+			end
 			-- resets remain
 			data[#data+1] = (remain>resets.countd and '|cFF00ff00') or (remain>0 and '|cFFff8000') or '|cFFff0000'
 			data[#data+1] = remain
@@ -984,6 +1008,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	InitDB(config.total, DEFDATA)
 	session  = config.session
 	resets   = config.resets
+	resetsd  = config.resetsd
 	notify   = config.notify
 	disabled = config.disabled
 	collect  = config.collect
@@ -1308,6 +1333,9 @@ do
 		defMenuStart(menu)
 		for _,reset in ipairs(resets) do
 			defMenuAdd(menu, format(reset.reseted and "%s - %s" or "|cFF808080%s - %s|r", date("%H:%M:%S",reset.time), reset.zone) )
+		end
+		if CLASSIC and #resetsd>0 then
+			defMenuAdd(menu, format("|cFFf0f000Next Daily Unlock: |r%s", FmtDuration( math.max( resetsd[1]+86400-time(),0) ) ) )
 		end
 		defMenuEnd(menu, L['None'])
 	end	}
