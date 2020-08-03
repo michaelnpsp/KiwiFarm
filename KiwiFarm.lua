@@ -13,6 +13,10 @@ local L = LibStub('AceLocale-3.0'):GetLocale('KiwiFarm', true)
 -- misc values
 local CLASSIC = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
 
+-- database keys
+local serverKey = GetRealmName()
+local charKey   = UnitName("player") .. " - " .. serverKey
+
 -- default values
 local RESET_MAX = CLASSIC and 5 or 10
 local RESET_DAY = 30
@@ -59,6 +63,11 @@ local SOUNDS = CLASSIC and {
 	["Quest List Open"] = 567504,
 }
 
+local DEFRESET = {
+	resets  = {count=0,countd=0}, -- resets per hour
+	resetsd = {}, -- resets per day  (max 30, only for classic)
+}
+
 local DEFDATA = {
 	-- money
 	moneyCash      = 0,
@@ -82,11 +91,10 @@ local DEFAULT = {
 	zone    = {},
 	-- fields blacklists
 	collect = { total = {}, daily = {}, zone = {} },
-	-- instances locks&resets
-	resets 	= { count = 0, countd = 0 }, -- hourly resets
-	resetsd = {},  -- daily resets (only for classic)
+	-- instances locks&resets per character
+	resetData = {},
 	-- reset chat notification
-	resetsNotify = { },
+	resetsNotify = {},
 	-- prices
 	priceByItem = {},
 	priceByQuality = { [0]={vendor=true}, [1]={vendor=true}, [2]={vendor=true}, [3]={vendor=true}, [4]={vendor=true}, [5]={vendor=true} },
@@ -176,6 +184,24 @@ local function InitDB(dst, src, reset, norecurse)
 		end
 	end
 	return dst
+end
+
+local function UpdateDB(config)
+	local resets = config.resets
+	if CLASSIC then
+		local data = config.resetData
+		local char = data[charKey] or DEFRESET
+		if config.resets or config.resetsd then -- move resets per realm to resets per char (due to blizzard hotfix) but only in classic version
+			char.resets  = config.resets  or char.resets
+			char.resetsd = config.resetsd or char.resetsd
+			config.resets  = nil
+			config.resetsd = nil
+		end
+		resets = char.resets
+		data[charKey] = char
+	end
+	resets.count  = resets.count  or 0
+	resets.countd = resets.countd or 0
 end
 
 local function AddDB(dst, src, blacklist)
@@ -998,7 +1024,6 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	timer:SetLooping("REPEAT")
 	timer:SetScript("OnLoop", RefreshText)
 	-- database setup
-	local serverKey = GetRealmName()
 	local root = KiwiFarmDB
 	if not root then root = {}; KiwiFarmDB = root; end
 	config = root[serverKey]
@@ -1006,14 +1031,13 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	InitDB(config, DEFAULT, false, true)
 	InitDB(config.session, DEFDATA)
 	InitDB(config.total, DEFDATA)
+	UpdateDB(config)
 	session  = config.session
-	resets   = config.resets
-	resetsd  = config.resetsd
 	notify   = config.notify
 	disabled = config.disabled
 	collect  = config.collect
-	resets.count  = resets.count or 0
-	resets.countd = resets.countd or 0
+	resets   = config.resets  or config.resetData[charKey].resets
+	resetsd  = config.resetsd or config.resetData[charKey].resetsd
 	-- remove old data from database
 	local key = date("%Y/%m/%d", time()-86400*7)
 	for k,v in next, config.daily do
