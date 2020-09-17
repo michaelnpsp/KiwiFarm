@@ -204,13 +204,11 @@ local UpdateDB = CLASSIC and function(config)
 	char.resets.count  = char.resets.count  or 0
 	char.resets.countd = char.resets.countd or 0
 	data[charKey] = char
-	print("Classic Database Updated!!!")
 end or function(config)		
 	config.resets  = config.resets  or {}
 	config.resetsd = config.resetsd or {}
 	config.resets.count  = config.resets.count  or 0
 	config.resets.countd = config.resets.countd or 0
-	print("Retail Database Updated!!!")
 end
 
 local function AddDB(dst, src, blacklist)
