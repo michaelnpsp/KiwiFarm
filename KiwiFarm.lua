@@ -7,11 +7,15 @@ local addonName = ...
 -- main frame
 local addon = CreateFrame('Frame', "KiwiFarm", UIParent)
 
+-- version check
+local CLASSIC = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
+if not strfind( GetAddOnMetadata("KiwiFarm","Version"),'project' ) and ( GetAddOnMetadata("KiwiFarm","X-WoW-Project")=='classic' ) ~= CLASSIC then
+	local err = string.format("KiwiFarm Critical Error: Wrong version. This version was packaged for World of Warcraft %s.", CLASSIC and 'Retail' or 'Classic')
+	print(err); assert(false, err)
+end
+
 -- locale
 local L = LibStub('AceLocale-3.0'):GetLocale('KiwiFarm', true)
-
--- misc values
-local CLASSIC = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
 
 -- database keys
 local serverKey = GetRealmName()
@@ -186,22 +190,27 @@ local function InitDB(dst, src, reset, norecurse)
 	return dst
 end
 
-local function UpdateDB(config)
-	local resets = config.resets
-	if CLASSIC then
-		local data = config.resetData
-		local char = data[charKey] or DEFRESET
-		if config.resets or config.resetsd then -- move resets per realm to resets per char (due to blizzard hotfix) but only in classic version
-			char.resets  = config.resets  or char.resets
-			char.resetsd = config.resetsd or char.resetsd
-			config.resets  = nil
-			config.resetsd = nil
-		end
-		resets = char.resets
-		data[charKey] = char
+local UpdateDB = CLASSIC and function(config)
+	local data = config.resetData
+	local char = data[charKey] or DEFRESET
+	if config.resets then -- move resets per realm to resets per char (due to blizzard hotfix) but only in classic version
+		char.resets = config.resets or char.resets
+		config.resets  = nil
 	end
-	resets.count  = resets.count  or 0
-	resets.countd = resets.countd or 0
+	if config.resetsd then -- move resets per realm to resets per char (due to blizzard hotfix) but only in classic version
+		char.resetsd = config.resetsd or char.resetsd
+		config.resetsd = nil
+	end
+	char.resets.count  = char.resets.count  or 0
+	char.resets.countd = char.resets.countd or 0
+	data[charKey] = char
+	print("Classic Database Updated!!!")
+end or function(config)		
+	config.resets  = config.resets  or {}
+	config.resetsd = config.resetsd or {}
+	config.resets.count  = config.resets.count  or 0
+	config.resets.countd = config.resets.countd or 0
+	print("Retail Database Updated!!!")
 end
 
 local function AddDB(dst, src, blacklist)
@@ -1028,6 +1037,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	if not root then root = {}; KiwiFarmDB = root; end
 	config = root[serverKey]
 	if not config then config = {}; root[serverKey] = config; end
+	addon.config = config
 	InitDB(config, DEFAULT, false, true)
 	InitDB(config.session, DEFDATA)
 	InitDB(config.total, DEFDATA)
