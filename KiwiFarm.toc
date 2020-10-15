@@ -1,5 +1,5 @@
 #@retail@
-## Interface: 80300
+## Interface: 90001
 ## X-WoW-Project: retail
 #@end-retail@
 #@non-retail@
