@@ -3,7 +3,7 @@
 ## X-WoW-Project: retail
 #@end-retail@
 #@non-retail@
-# ## Interface: 11305
+# ## Interface: 11306
 ## X-WoW-Project: classic
 #@end-non-retail@
 ## Title: |cFF7FFF72Kiwi|r Farm
