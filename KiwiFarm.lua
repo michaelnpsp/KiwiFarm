@@ -8,9 +8,12 @@ local addonName = ...
 local addon = CreateFrame('Frame', "KiwiFarm", UIParent)
 
 -- version check
-local CLASSIC = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
-if not strfind( GetAddOnMetadata("KiwiFarm","Version"),'project' ) and ( GetAddOnMetadata("KiwiFarm","X-WoW-Project")=='classic' ) ~= CLASSIC then
-	local err = string.format("KiwiFarm Critical Error: Wrong version. This version was packaged for World of Warcraft %s.", CLASSIC and 'Retail' or 'Classic')
+local isRetailBuild = true
+--[===[@non-retail@
+isRetailBuild = false
+--@end-non-retail@]===]
+if isRetailBuild~=(WOW_PROJECT_ID==WOW_PROJECT_MAINLINE) and GetAddOnMetadata("KiwiFarm","Version")~='@project-version@' then
+	local err = string.format("KiwiFarm Critical Error: Wrong version. This version was packaged for World of Warcraft %s.", isRetailBuild and 'Retail' or 'Classic')
 	print(err); assert(false, err)
 end
 
@@ -204,7 +207,7 @@ local UpdateDB = CLASSIC and function(config)
 	char.resets.count  = char.resets.count  or 0
 	char.resets.countd = char.resets.countd or 0
 	data[charKey] = char
-end or function(config)		
+end or function(config)
 	config.resets  = config.resets  or {}
 	config.resetsd = config.resetsd or {}
 	config.resets.count  = config.resets.count  or 0
