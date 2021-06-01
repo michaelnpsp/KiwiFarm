@@ -7,19 +7,11 @@ local addonName = ...
 -- main frame
 local addon = CreateFrame('Frame', "KiwiFarm", UIParent)
 
--- version check
-local isRetailBuild = true
---[===[@non-retail@
-isRetailBuild = false
---@end-non-retail@]===]
-local CLASSIC = select(4,GetBuildInfo())<30000
-if isRetailBuild==CLASSIC and GetAddOnMetadata("KiwiFarm","Version")~=('@'..'project-version'..'@') then
-	local err = string.format("KiwiFarm Critical Error: Wrong version. This version was packaged for World of Warcraft %s.", isRetailBuild and 'Retail' or 'Classic')
-	print(err); assert(false, err)
-end
-
 -- locale
 local L = LibStub('AceLocale-3.0'):GetLocale('KiwiFarm', true)
+
+-- game version
+local CLASSIC = select(4,GetBuildInfo())<30000
 
 -- database keys
 local serverKey = GetRealmName()
