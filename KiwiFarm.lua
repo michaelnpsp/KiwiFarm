@@ -12,7 +12,8 @@ local isRetailBuild = true
 --[===[@non-retail@
 isRetailBuild = false
 --@end-non-retail@]===]
-if isRetailBuild~=(WOW_PROJECT_ID==WOW_PROJECT_MAINLINE) and GetAddOnMetadata("KiwiFarm","Version")~='@project-version@' then
+local CLASSIC = select(4,GetBuildInfo())<30000
+if isRetailBuild==CLASSIC and GetAddOnMetadata("KiwiFarm","Version")~='@project-version@' then
 	local err = string.format("KiwiFarm Critical Error: Wrong version. This version was packaged for World of Warcraft %s.", isRetailBuild and 'Retail' or 'Classic')
 	print(err); assert(false, err)
 end
