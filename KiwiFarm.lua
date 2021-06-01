@@ -13,7 +13,7 @@ local isRetailBuild = true
 isRetailBuild = false
 --@end-non-retail@]===]
 local CLASSIC = select(4,GetBuildInfo())<30000
-if isRetailBuild==CLASSIC and GetAddOnMetadata("KiwiFarm","Version")~='@project-version@' then
+if isRetailBuild==CLASSIC and GetAddOnMetadata("KiwiFarm","Version")~=('@'..'project-version'..'@') then
 	local err = string.format("KiwiFarm Critical Error: Wrong version. This version was packaged for World of Warcraft %s.", isRetailBuild and 'Retail' or 'Classic')
 	print(err); assert(false, err)
 end
