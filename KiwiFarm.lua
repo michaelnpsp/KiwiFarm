@@ -13,6 +13,10 @@ local L = LibStub('AceLocale-3.0'):GetLocale('KiwiFarm', true)
 -- game version
 local CLASSIC = select(4,GetBuildInfo())<30000
 
+-- addon version
+local versionToc = GetAddOnMetadata(addonName, "Version")
+local versionStr = (versionToc=='@project-version@' and 'Dev' or versionToc)
+
 -- database keys
 local serverKey = GetRealmName()
 local charKey   = UnitName("player") .. " - " .. serverKey
@@ -266,6 +270,16 @@ do
 		end
 	end
 	ZoneTitle = setmetatable( {}, { __index = function(t,k) local v=strcut(k,18); t[k]=v; return v; end } )
+end
+
+local function GetSessionGeneralStats()
+	local curtime  = time()
+	local duration = curtime - (session.startTime or curtime) + (session.duration or 0)
+	local total    = session.moneyCash+session.moneyItems
+	local hourly   = duration>0 and floor(total*3600/duration) or 0
+	local m0, s0   = floor(duration/60), duration%60
+	local h0, m0   = floor(m0/60), m0%60
+	return total, hourly, session.moneyCash, session.moneyItems, h0, m0, s0
 end
 
 -- text format functions
@@ -820,7 +834,7 @@ end)
 -- shift+mouse click to reset instances
 addon:SetScript("OnMouseUp", function(self, button)
 	if button == 'RightButton' then
-		addon:ShowMenu()
+		addon:ShowMenu(true)
 	elseif button == 'LeftButton' and IsShiftKeyDown() then -- reset instances data
 		ResetInstances()
 	end
@@ -1071,8 +1085,18 @@ addon:SetScript("OnEvent", function(frame, event, name)
 			end
 		end,
 		OnTooltipShow = function(tooltip)
-			tooltip:AddDoubleLine("KiwiFarm", GetAddOnMetadata(addonName, "Version") )
-			tooltip:AddLine(L["|cFFff4040Left Click|r toggle window visibility\n|cFFff4040Right Click|r open config menu"], 0.2, 1, 0.2)
+			tooltip:AddDoubleLine("KiwiFarm", versionStr)
+			if session.startTime or session.duration then
+				local total, hourly, cash, items, hh, mm = GetSessionGeneralStats()
+				local cc = session.startTime and '|cFF00ff00' or '|cFFff8000'
+				local ss = hh>0 and format("%s%dh %dm|r",cc,hh,mm) or format("%s%dm|r",cc,mm)
+				tooltip:AddDoubleLine(L["Session:"],    ss, 1,1,1)
+				tooltip:AddDoubleLine(L["Gold cash:"],  FmtMoney(cash),   1,1,1, 1,1,1)
+				tooltip:AddDoubleLine(L["Gold items:"], FmtMoney(items),  1,1,1, 1,1,1)
+				tooltip:AddDoubleLine(L["Gold/hour:"],  FmtMoney(hourly), 1,1,1, 1,1,1)
+				tooltip:AddDoubleLine(L["Gold total:"], FmtMoney(total),  1,1,1, 1,1,1)
+			end
+			tooltip:AddLine(L["|cFFff4040Left Click|r toggle visibility\n|cFFff4040Right Click|r open menu"], 0.2, 1, 0.2)
 		end,
 	}) , config.minimapIcon)
 	-- events
@@ -1117,6 +1141,9 @@ SlashCmdList.KIWIFARM = function(args)
 		SessionFinish()
 	elseif arg1 == 'config' then
 		addon:ShowMenu()
+	elseif arg1 == 'resetpos' then
+		config.framePos.x, config.framePos.x = 0, 0
+		RestorePosition()
 	elseif arg1 == 'minimap' then
 		config.minimapIcon.hide = not config.minimapIcon.hide
 		if config.minimapIcon.hide then
@@ -1138,6 +1165,7 @@ SlashCmdList.KIWIFARM = function(args)
 		print("  /kfarm finish   -- session finish")
  		print("  /kfarm config   -- display config menu")
 		print("  /kfarm minimap  -- toggle minimap icon visibility")
+		print("  /kfarm resetpos -- reset main window position")
 	end
 end
 
@@ -1162,33 +1190,35 @@ do
 				end
 				for index=1,#menuList do
 					local item = menuList[index]
-					if item.useParentValue then -- use the value of the parent popup, needed to make splitMenu() transparent
-						item.value = UIDROPDOWNMENU_MENU_VALUE
-					end
-					if type(item.text)=='function' then -- save function text in another field for later use
-						item.textf = item.text
-					end
-					if type(item.disabled)=='function' then
-						item.disabledf = item.disabled
-					end
-					if item.disabledf then -- support for functions instead of only booleans
-						item.disabled = item.disabledf(item, level, frame)
-					end
-					if item.textf then -- support for functions instead of only strings
-						item.text = item.textf(item, level, frame)
-					end
-					if item.hasColorSwatch then -- simplified color management, only definition of get&set functions required to retrieve&save the color
-						if not item.swatchFunc then
-							local get, set = item.get, item.set
-							item.swatchFunc  = function() local r,g,b,a = get(item); r,g,b = ColorPickerFrame:GetColorRGB(); set(item,r,g,b,a) end
-							item.opacityFunc = function() local r,g,b   = get(item); set(item, r,g,b,1-OpacitySliderFrame:GetValue()) end
-							item.cancelFunc  = function(c) set(item, c.r, c.g, c.b, 1-c.opacity) end
+					if item.hidden==nil or not item.hidden(item) then
+						if item.useParentValue then -- use the value of the parent popup, needed to make splitMenu() transparent
+							item.value = UIDROPDOWNMENU_MENU_VALUE
 						end
-						item.r, item.g, item.b, item.opacity = item.get(item)
-						item.opacity = 1 - item.opacity
+						if type(item.text)=='function' then -- save function text in another field for later use
+							item.textf = item.text
+						end
+						if type(item.disabled)=='function' then
+							item.disabledf = item.disabled
+						end
+						if item.disabledf then -- support for functions instead of only booleans
+							item.disabled = item.disabledf(item, level, frame)
+						end
+						if item.textf then -- support for functions instead of only strings
+							item.text = item.textf(item, level, frame)
+						end
+						if item.hasColorSwatch then -- simplified color management, only definition of get&set functions required to retrieve&save the color
+							if not item.swatchFunc then
+								local get, set = item.get, item.set
+								item.swatchFunc  = function() local r,g,b,a = get(item); r,g,b = ColorPickerFrame:GetColorRGB(); set(item,r,g,b,a) end
+								item.opacityFunc = function() local r,g,b   = get(item); set(item, r,g,b,1-OpacitySliderFrame:GetValue()) end
+								item.cancelFunc  = function(c) set(item, c.r, c.g, c.b, 1-c.opacity) end
+							end
+							item.r, item.g, item.b, item.opacity = item.get(item)
+							item.opacity = 1 - item.opacity
+						end
+						item.index = index
+						UIDropDownMenu_AddButton(item,level)
 					end
-					item.index = index
-					UIDropDownMenu_AddButton(item,level)
 				end
 			end
 		end
@@ -1288,6 +1318,7 @@ do
 
 	-- here starts the definition of the KiwiFrame menu
 	local stats -- reference to table stats data ( = config.session | config.total | config.zone[key] | config.daily[key] )
+	local openedFromMain -- was the menu opened from the main window ?
 
 	local function InitPriceSources(menu)
 		for i=#menu,1,-1 do
@@ -1873,10 +1904,10 @@ do
 				set = function(info, ...) config.backColor = {...}; SetBackground(); end,
 			},
 		} },
-		{ text = L['Hide Window'], notCheckable = true, func = function() addon:Hide(); config.visible=false; end },
+		{ text = L['Hide Window'], notCheckable = true, hidden = function() return not openedFromMain end, func = function() addon:SetShown(false); config.visible = false; end },
 	}
-
-	function addon:ShowMenu()
+	function addon:ShowMenu(fromMain)
+		openedFromMain = fromMain
 		showMenu(menuMain, menuFrame, "cursor", 0 , 0)
 	end
 end
