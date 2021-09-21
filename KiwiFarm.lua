@@ -842,42 +842,52 @@ function addon:CHAT_MSG_SYSTEM(event,msg)
 end
 
 -- looted items
-local PATTERN_LOOTS = LOOT_ITEM_SELF:gsub("%%s", "(.+)")
-local PATTERN_LOOTM = LOOT_ITEM_SELF_MULTIPLE:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)")
-function addon:CHAT_MSG_LOOT(event,msg)
-	if session.startTime then
-		local itemLink, quantity = strmatch(msg, PATTERN_LOOTM)
-		if not itemLink then
-			quantity = 1
-			itemLink = strmatch(msg, PATTERN_LOOTS)
+do
+	local loot_patterns = {
+		LOOT_ITEM_SELF_MULTIPLE:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)"),
+		LOOT_ITEM_PUSHED_SELF_MULTIPLE:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)"),
+		LOOT_ITEM_SELF:gsub("%%s", "(.+)"),
+		LOOT_ITEM_PUSHED_SELF:gsub("%%s", "(.+)"),
+	}
+	local function GetItemInfoFromMsg(msg)
+		for _,pattern in ipairs(loot_patterns) do
+			local itemLink, quantity = strmatch(msg, pattern)
+			if itemLink then
+				return itemLink, quantity or 1
+			end
 		end
-		if itemLink then
-			local price, rarity, itemName = GetItemPrice(itemLink)
-			if price then
-				local money = price*quantity
-				-- register item looted
-				local data = session.lootedItems[itemLink]
-				if data then
-					data[1] = data[1] + money
-					data[2] = data[2] + quantity
-				else
-					session.lootedItems[itemLink] = { money, quantity }
-					timeLootedItems = time()
+	end
+	function addon:CHAT_MSG_LOOT(event,msg)
+		if session.startTime then
+			local itemLink, quantity = GetItemInfoFromMsg(msg)
+			if itemLink then
+				local price, rarity, itemName = GetItemPrice(itemLink)
+				if price and rarity then
+					local money = price*quantity
+					-- register item looted
+					local data = session.lootedItems[itemLink]
+					if data then
+						data[1] = data[1] + money
+						data[2] = data[2] + quantity
+					else
+						session.lootedItems[itemLink] = { money, quantity }
+						timeLootedItems = time()
+					end
+					-- register item money earned
+					session.moneyItems = session.moneyItems + money
+					session.moneyByQuality[rarity] = (session.moneyByQuality[rarity] or 0) + money
+					-- register counts
+					session.countItems = session.countItems + quantity
+					session.countByQuality[rarity] = (session.countByQuality[rarity] or 0) + quantity
+					-- register zone if necessary
+					if not session.zoneName then
+						session.zoneName = curZoneName
+					end
+					-- notifications
+					if notify[rarity] then Notify(rarity,   itemLink, quantity, money) end
+					if notify.price   then Notify('price',  itemLink, quantity, money) end
+					NotifyEnd()
 				end
-				-- register item money earned
-				session.moneyItems = session.moneyItems + money
-				session.moneyByQuality[rarity] = (session.moneyByQuality[rarity] or 0) + money
-				-- register counts
-				session.countItems = session.countItems + quantity
-				session.countByQuality[rarity] = (session.countByQuality[rarity] or 0) + quantity
-				-- register zone if necessary
-				if not session.zoneName then
-					session.zoneName = curZoneName
-				end
-				-- notifications
-				if notify[rarity] then Notify(rarity,   itemLink, quantity, money) end
-				if notify.price   then Notify('price',  itemLink, quantity, money) end
-				NotifyEnd()
 			end
 		end
 	end
@@ -1098,6 +1108,7 @@ SlashCmdList.KIWIFARM = function(args)
 		addon:Hide()
 	elseif arg1 == 'toggle' then
 		addon:SetShown( not addon:IsShown() )
+		config.visible = addon:IsShown()
 	elseif arg1 == 'start'  then
 		SessionStart()
 	elseif arg1 == 'stop' then
@@ -1861,8 +1872,8 @@ do
 				get = function() return unpack(config.backColor) end,
 				set = function(info, ...) config.backColor = {...}; SetBackground(); end,
 			},
-			{ text = L['Hide Window'], notCheckable = true, func = function() addon:Hide() end },
 		} },
+		{ text = L['Hide Window'], notCheckable = true, func = function() addon:Hide(); config.visible=false; end },
 	}
 
 	function addon:ShowMenu()
