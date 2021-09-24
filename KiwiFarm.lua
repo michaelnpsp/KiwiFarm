@@ -312,6 +312,15 @@ local function FmtMoney(money)
 	return format( config.moneyFmt or "%d|cffffd70ag|r %d|cffc7c7cfs|r %d|cffeda55fc|r", gold, silver, copper)
 end
 
+local function FmtMoneyPlain(money)
+	money = money or 0
+	local gold   = floor(  money / COPPER_PER_GOLD )
+    local silver = floor( (money % COPPER_PER_GOLD) / COPPER_PER_SILVER )
+    local copper = floor(  money % COPPER_PER_SILVER )
+	return format( config.moneyFmt or "%dg %ds %dc", gold, silver, copper)
+end
+
+
 local function FmtMoneyShort(money)
 	local str    = ''
 	local gold   = floor(  money / COPPER_PER_GOLD )
@@ -798,6 +807,15 @@ local function UpdateFrameSize()
 	addon:SetScript('OnUpdate', UpdateFrameAlpha)
 end
 
+-- change main frame visibility: nil == toggle visibility
+local function UpdateFrameVisibility(visible)
+	if visible == nil then
+		visible = not addon:IsShown()
+	end
+	addon:SetShown(visible)
+	config.visible = visible
+end
+
 -- layout main frame
 local function LayoutFrame()
 	addon:SetAlpha(0)
@@ -1080,8 +1098,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 			if button == 'RightButton' then
 				addon:ShowMenu()
 			else
-				addon:SetShown( not addon:IsShown() )
-				config.visible = addon:IsShown()
+				UpdateFrameVisibility()
 			end
 		end,
 		OnTooltipShow = function(tooltip)
@@ -1131,8 +1148,7 @@ SlashCmdList.KIWIFARM = function(args)
 	elseif arg1 == 'hide' then
 		addon:Hide()
 	elseif arg1 == 'toggle' then
-		addon:SetShown( not addon:IsShown() )
-		config.visible = addon:IsShown()
+		UpdateFrameVisibility()
 	elseif arg1 == 'start'  then
 		SessionStart()
 	elseif arg1 == 'stop' then
@@ -1318,6 +1334,7 @@ do
 
 	-- here starts the definition of the KiwiFrame menu
 	local stats -- reference to table stats data ( = config.session | config.total | config.zone[key] | config.daily[key] )
+	local stats_duration, stats_goldhour -- last submenu stats data cached
 	local openedFromMain -- was the menu opened from the main window ?
 
 	local function InitPriceSources(menu)
@@ -1714,6 +1731,54 @@ do
 		end },
 	}
 
+	-- submenu: report to
+	local menuReportTo
+	do
+		local titles = {
+			daily   = L["Farm Date: %s"],
+			zone    = L["Farm Zone: %s"],
+		}
+		local function channelHidden(info)
+			if info.value=='PARTY' then
+				return not IsInGroup(LE_PARTY_CATEGORY_HOME)
+			elseif info.value=='RAID' then
+				return not IsInRaid(LE_PARTY_CATEGORY_HOME)
+			elseif info.value=='GUILD' then
+				return not GetGuildInfo("player")
+			end
+		end
+		local function reportStats(channel, player)
+			SendChatMessage( ':::::::::KiwiFarm Report:::::::::', channel, nil, player )
+			if stats._key then
+				SendChatMessage( format(titles[stats._type],stats._key), channel, nil, player)
+			end
+			SendChatMessage( format(L["Farm Time: %s"], FmtDuration(stats_duration)), channel, nil, player )
+			SendChatMessage( format(L["Mobs killed: %d"], stats.countMobs), channel, nil, player )
+			SendChatMessage( format(L["Items looted: %d"], stats.countItems), channel, nil, player )
+			SendChatMessage( format(L["Gold cash: %s"], FmtMoneyPlain(stats.moneyCash)),  channel, nil, player )
+			SendChatMessage( format(L["Gold items: %s"], FmtMoneyPlain(stats.moneyItems)), channel, nil, player )
+			SendChatMessage( format(L["Gold/hour: %s"], FmtMoneyPlain(stats_goldhour)),  channel, nil, player )
+			SendChatMessage( format(L["Gold total: %s"], FmtMoneyPlain(stats.moneyCash+stats.moneyItems)), channel, nil, player )
+		end
+		local function reportChannel(info)
+			reportStats(info.value)
+		end
+		local function reportWhisper(info)
+			addon:EditDialog( L["Type Player Name:"], '', function(player)
+				player = strtrim(player)
+				if player~='' then
+					reportStats('WHISPER', player)
+				end
+			end )
+		end
+		menuReportTo = {
+			{ text = L['Guild'],   notCheckable = true, value = 'GUILD',   hidden = channelHidden, func = reportChannel },
+			{ text = L['Party'],   notCheckable = true, value = 'PARTY',   hidden = channelHidden, func = reportChannel },
+			{ text = L['Raid'],    notCheckable = true, value = 'RAID',    hidden = channelHidden, func = reportChannel },
+			{ text = L['Whisper'], notCheckable = true, value = 'WHISPER', hidden = channelHidden, func = reportWhisper },
+		}
+	end
+
 	-- submenu: stats
 	local menuStats = {
 		{ notCheckable = true },
@@ -1724,6 +1789,7 @@ do
 		{ text = L['Looted Items'], notCheckable = true, hasArrow = true, menuList = menuGoldQuality },
 		{ text = L['Killed Mobs'],  notCheckable = true, hasArrow = true, menuList = menuKilledMobs  },
 		{ text = L['Maintenance'],  notCheckable = true, hasArrow = true, menuList = menuStatsMisc   },
+		{ text = L['Report To'],    notCheckable = true, hasArrow = true, menuList = menuReportTo    },
 		init = function(menu,level)
 			local curTime = time()
 			local field = getMenuValue(level)
@@ -1739,6 +1805,7 @@ do
 			menu[5].text = format(L["Gold total: %s"], FmtMoney(money))
 			menu[6].text = format(L["Items looted (%d)"], stats.countItems)
 			menu[7].text = format(L["Mobs killed (%d)"], stats.countMobs)
+			stats_duration, stats_goldhour = ftime, mhour
 			timeLootedItems = curTime
 		end,
 	}
@@ -1904,7 +1971,7 @@ do
 				set = function(info, ...) config.backColor = {...}; SetBackground(); end,
 			},
 		} },
-		{ text = L['Hide Window'], notCheckable = true, hidden = function() return not openedFromMain end, func = function() addon:SetShown(false); config.visible = false; end },
+		{ text = L['Hide Window'], notCheckable = true, hidden = function() return not openedFromMain end, func = function() UpdateFrameVisibility(false); end },
 	}
 	function addon:ShowMenu(fromMain)
 		openedFromMain = fromMain
