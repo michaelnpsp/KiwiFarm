@@ -134,8 +134,9 @@ local tremove = tremove
 local tonumber = tonumber
 local gsub = gsub
 local strfind = strfind
-local floor = math.floor
 local strlower = strlower
+local max = math.max
+local floor = math.floor
 local format = string.format
 local band = bit.band
 local strmatch = strmatch
@@ -498,11 +499,36 @@ end
 -- calculate item price
 local GetItemPrice
 do
-	local max = math.max
-	local ItemUpgradeInfo, AuxHistory, AuxInfo
-	local function InitAuctionator()
-		ItemUpgradeInfo = Atr_GetAuctionPrice and Atr_CalcDisenchantPrice and LibStub('LibItemUpgradeInfo-1.0',true) -- check if auctionator is installed
+	-- auctionator addon
+	local InitAuctionator, Auctionator_GetMarketPrice, Auctionator_GetDisenchantPrice, ItemUpgradeInfo
+	if CLASSIC then -- auctionator for classic
+		function Auctionator_GetMarketPrice(name, itemID)
+			return Atr_GetAuctionPrice(name)
+		end
+		function Auctionator_GetDisenchantPrice(itemLink, class, rarity)
+			return Atr_CalcDisenchantPrice(class, rarity, ItemUpgradeInfo:GetUpgradedItemLevel(itemLink)) -- Atr_GetDisenchantValue() is bugged cannot be used
+		end
+		function InitAuctionator()
+			ItemUpgradeInfo = Atr_GetAuctionPrice and Atr_CalcDisenchantPrice and LibStub('LibItemUpgradeInfo-1.0',true) -- check if auctionator for classic is installed
+		end
+	else -- auctionator for retail
+		local GetAuctionPriceByItemID, GetDisenchantAuctionPrice
+		function Auctionator_GetMarketPrice(name, itemID)
+			return GetAuctionPriceByItemID('KiwiFarm',itemID)
+		end
+		function Auctionator_GetDisenchantPrice(itemLink, class, rarity)
+			return GetDisenchantAuctionPrice(itemLink)
+		end
+		function InitAuctionator()
+			if Auctionator and Auctionator.API and Auctionator.API.v1 then
+				GetAuctionPriceByItemID = Auctionator.API.v1.GetAuctionPriceByItemID
+				GetDisenchantAuctionPrice = Auctionator.Enchant.GetDisenchantAuctionPrice
+				ItemUpgradeInfo = true
+			end
+		end
 	end
+	-- aux addon
+	local AuxHistory, AuxInfo
 	local function InitAuxAddon()
 		if _G.require and _G.aux_frame then
 			AuxHistory = _G.require('aux.core.history')
@@ -513,6 +539,7 @@ do
 		local item_id, suffix_id = AuxInfo.parse_link(itemLink)
 		return item_id .. ':'.. suffix_id
 	end
+	-- common code
 	local function GetValue(source, itemLink, itemID, name, class, rarity, vendorPrice, userPrice)
 		local price
 		if source == 'user' then
@@ -520,9 +547,9 @@ do
 		elseif source == 'vendor' then
 			price = vendorPrice
 		elseif source == 'Atr:DBMarket' and ItemUpgradeInfo then -- Auctionator: market
-			price = Atr_GetAuctionPrice(name)
+			price = Auctionator_GetMarketPrice(name, itemID)
 		elseif source == 'Atr:Destroy' and ItemUpgradeInfo then -- Auctionator: disenchant
-			price = Atr_CalcDisenchantPrice(class, rarity, ItemUpgradeInfo:GetUpgradedItemLevel(itemLink)) -- Atr_GetDisenchantValue() is bugged cannot be used
+			price = Auctionator_GetDisenchantPrice(itemLink, class, rarity)
 		elseif source == 'Aux:Market' and AuxHistory then
 			price = AuxHistory.market_value( GenAuxItemKey(itemLink) )
 		elseif source == 'Aux:MinBuyout' and AuxHistory then
@@ -1354,11 +1381,10 @@ do
 	local stats -- reference to table stats data ( = config.session | config.total | config.zone[key] | config.daily[key] )
 	local stats_duration, stats_goldhour -- last submenu stats data cached
 	local openedFromMain -- was the menu opened from the main window ?
-
 	local function InitPriceSources(menu)
 		for i=#menu,1,-1 do
 			local arg = menu[i].arg1
-			if (arg =='Atr' and not Atr_GetAuctionPrice) or (arg =='TSM' and not TSMAPI) or (arg == 'Aux' and not aux_frame) then
+			if (arg =='Atr' and not Atr_GetAuctionPrice and not Auctionator) or (arg =='TSM' and not TSMAPI) or (arg == 'Aux' and not aux_frame) then
 				tremove(menu,i)
 			end
 		end
