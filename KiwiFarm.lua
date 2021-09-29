@@ -528,11 +528,12 @@ do
 		end
 	end
 	-- aux addon
-	local AuxHistory, AuxInfo
+	local AuxHistory, AuxInfo, AuxDisenchant
 	local function InitAuxAddon()
 		if _G.require and _G.aux_frame then
 			AuxHistory = _G.require('aux.core.history')
 			AuxInfo = _G.require('aux.util.info')
+			AuxDisenchant = _G.require('aux.core.disenchant')
 		end
 	end
 	local function GenAuxItemKey(itemLink)
@@ -554,6 +555,9 @@ do
 			price = AuxHistory.market_value( GenAuxItemKey(itemLink) )
 		elseif source == 'Aux:MinBuyout' and AuxHistory then
 			price = AuxHistory.value( GenAuxItemKey(itemLink) )
+		elseif source == 'Aux:Disenchant' and AuxDisenchant then
+			local item = AuxInfo.item(itemID)
+			price = item and AuxDisenchant.value(item.item_id, item.slot, item.quality, item.level)
 		elseif TSM_API and TSM_API.GetCustomPriceValue then -- TSM sources
 			price = TSM_API.GetCustomPriceValue(source, "i:"..itemID)
 		end
@@ -1483,14 +1487,15 @@ do
 			sources[info.value] = (not sources[info.value]) or nil
 		end
 		menuQualitySources = {
-			{ text = L['Vendor Price'],              value = 'vendor',                      isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['Auctionator: Market Value'], value = 'Atr:DBMarket',  arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['Auctionator: Disenchant'],   value = 'Atr:Destroy' ,  arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['TSM: Market Value'],         value = 'DBMarket',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['TSM: Min Buyout'],           value = 'DBMinBuyout',   arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['TSM: Disenchant'],           value = 'Destroy',       arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['Aux: Market Value'],         value = 'Aux:Market',    arg1 = 'Aux', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['Aux: Min Buyout'],           value = 'Aux:MinBuyout', arg1 = 'Aux', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Vendor Price'],              value = 'vendor',                       isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Auctionator: Market Value'], value = 'Atr:DBMarket',   arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Auctionator: Disenchant'],   value = 'Atr:Destroy' ,   arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['TSM: Market Value'],         value = 'DBMarket',       arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['TSM: Min Buyout'],           value = 'DBMinBuyout',    arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['TSM: Disenchant'],           value = 'Destroy',        arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Aux: Market Value'],         value = 'Aux:Market',     arg1 = 'Aux', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Aux: Min Buyout'],           value = 'Aux:MinBuyout',  arg1 = 'Aux', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Aux: Disenchant'],           value = 'Aux:Disenchant', arg1 = 'Aux', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
 			init = InitPriceSources
 		}
 	end
@@ -1563,15 +1568,16 @@ do
 		end
 		-- submenu: item price sources
 		menuItemSources = {
-			{ text = getText,	  				     value = 'user',           		        isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['Vendor Price'],              value = 'vendor',                      isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['Auctionator: Market Value'], value = 'Atr:DBMarket',  arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['Auctionator: Disenchant'],   value = 'Atr:Destroy' ,  arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['TSM: Market Value'],         value = 'DBMarket',      arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['TSM: Min Buyout'],           value = 'DBMinBuyout',   arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['TSM: Disenchant'],           value = 'Destroy',       arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['Aux: Market Value'],         value = 'Aux:Market',    arg1 = 'Aux', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['Aux: Min Buyout'],           value = 'Aux:MinBuyout', arg1 = 'Aux', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = getText,	  				     value = 'user',                         isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Vendor Price'],              value = 'vendor',                       isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Auctionator: Market Value'], value = 'Atr:DBMarket',   arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Auctionator: Disenchant'],   value = 'Atr:Destroy' ,   arg1 = 'Atr', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['TSM: Market Value'],         value = 'DBMarket',       arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['TSM: Min Buyout'],           value = 'DBMinBuyout',    arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['TSM: Disenchant'],           value = 'Destroy',        arg1 = 'TSM', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Aux: Market Value'],         value = 'Aux:Market',     arg1 = 'Aux', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Aux: Min Buyout'],           value = 'Aux:MinBuyout',  arg1 = 'Aux', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
+			{ text = L['Aux: Disenchant'],           value = 'Aux:Disenchant', arg1 = 'Aux', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
 			init = InitPriceSources,
 		}
 		-- submenu: individual items prices
