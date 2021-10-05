@@ -1240,8 +1240,7 @@ end
 
 do
 	-- popup menu main frame
-	local menuFrame = CreateFrame("Frame", "KiwiFarmPopupMenu", UIParent, "UIDropDownMenuTemplate")
-
+	local menuFrame
 	-- generic & enhanced popup menu management code, reusable for other menus
 	local showMenu, refreshMenu, getMenuLevel, getMenuValue
 	do
@@ -1310,6 +1309,7 @@ do
 		end
 		-- show my enhanced popup menu
 		function showMenu(menuList, menuFrame, anchor, x, y, autoHideDelay )
+			menuFrame = menuFrame or CreateFrame("Frame", "KiwiFarmPopupMenu", UIParent, "UIDropDownMenuTemplate")
 			menuFrame.displayMode = "MENU"
 			menuFrame.menuValues = menuFrame.menuValues  or {}
 			UIDropDownMenu_Initialize(menuFrame, initialize, "MENU", nil, menuList);
