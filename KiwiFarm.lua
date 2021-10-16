@@ -115,6 +115,7 @@ local DEFAULT = {
 	fontName    = nil,
 	fontsize    = nil,
 	framePos    = { anchor = 'TOPLEFT', x = 0, y = 0 },
+	-- minimap icon
 	minimapIcon = { hide = false },
 	-- debug
 	debug = {}
@@ -361,6 +362,21 @@ local function SetTextFont(widget, name, size, flags)
 	end
 end
 
+-- group or raid members unit
+local GetGroupRaidMembers
+do
+	local party = { 'party1', 'party2', 'party3', 'party4' }
+	local raid  = {}
+	for i=1,40 do raid[#raid+1] = 'raid'..i; end
+	function GetGroupRaidMembers()
+		if IsInRaid() then
+			return raid
+		elseif GetNumGroupMembers()>0 then
+			return party
+		end
+	end
+end
+
 -- dialogs
 do
 	local DUMMY = function() end
@@ -584,9 +600,7 @@ end
 -- lock&resets management
 local LockAddReset, LockAddInstance, LockDel, LockResetAll
 do
-	-- register instance reset
-	function LockAddReset(zone)
-		local ctime = time()
+	local function LockAddCharReset(zone, ctime, resets, resetsd)
 		if CLASSIC then
 			resetsd[#resetsd+1] = ctime -- classic to track 30/24h limit
 		end
@@ -600,7 +614,30 @@ do
 				return
 			end
 		end
-		resets[#resets+1] =  { zone = zone, time =  ctime, reseted = ctime}
+		resets[#resets+1] =  { zone = zone, time = ctime, reseted = ctime}
+	end
+	local function CheckPartyAlts(zone, ctime) -- reset of alts in party/raid for classic
+		if CLASSIC then
+			local units = GetGroupRaidMembers()
+			if units then
+				for _,unit in ipairs(units) do
+					if not UnitExists(unit) then break end
+					local nameKey = UnitName(unit) .. " - " .. serverKey
+					if charKey~=nameKey then
+						local resetChar = config.resetData[nameKey]
+						if resetChar then
+							LockAddCharReset(zone, ctime, resetChar.resets, resetChar.resetsd, true)
+						end
+					end
+				end
+			end
+		end
+	end
+	-- register instance reset
+	function LockAddReset(zone)
+		local ctime = time()
+		LockAddCharReset(zone, ctime, resets, resetsd) -- current char reset
+		CheckPartyAlts(zone, ctime)
 	end
 	-- add used instance
 	function LockAddInstance(zone)
