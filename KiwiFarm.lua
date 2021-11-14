@@ -516,30 +516,25 @@ end
 local GetItemPrice
 do
 	-- auctionator addon
-	local InitAuctionator, Auctionator_GetMarketPrice, Auctionator_GetDisenchantPrice, ItemUpgradeInfo
-	if CLASSIC then -- auctionator for classic
-		function Auctionator_GetMarketPrice(name, itemID)
-			return Atr_GetAuctionPrice(name)
-		end
-		function Auctionator_GetDisenchantPrice(itemLink, class, rarity)
-			return Atr_CalcDisenchantPrice(class, rarity, ItemUpgradeInfo:GetUpgradedItemLevel(itemLink)) -- Atr_GetDisenchantValue() is bugged cannot be used
-		end
-		function InitAuctionator()
-			ItemUpgradeInfo = Atr_GetAuctionPrice and Atr_CalcDisenchantPrice and LibStub('LibItemUpgradeInfo-1.0',true) -- check if auctionator for classic is installed
-		end
-	else -- auctionator for retail
-		local GetAuctionPriceByItemID, GetDisenchantAuctionPrice
-		function Auctionator_GetMarketPrice(name, itemID)
-			return GetAuctionPriceByItemID('KiwiFarm',itemID)
-		end
-		function Auctionator_GetDisenchantPrice(itemLink, class, rarity)
-			return GetDisenchantAuctionPrice(itemLink)
-		end
-		function InitAuctionator()
-			if Auctionator and Auctionator.API and Auctionator.API.v1 then
-				GetAuctionPriceByItemID = Auctionator.API.v1.GetAuctionPriceByItemID
-				GetDisenchantAuctionPrice = Auctionator.Enchant.GetDisenchantAuctionPrice
-				ItemUpgradeInfo = true
+	local Auctionator_GetMarketPrice, Auctionator_GetDisenchantPrice, ItemUpgradeInfo
+	local function InitAuctionator()
+		if CLASSIC and Atr_GetAuctionPrice and Atr_CalcDisenchantPrice then -- auctionator ClassicFix (GepyFix)
+			ItemUpgradeInfo = LibStub('LibItemUpgradeInfo-1.0',true)
+			Auctionator_GetMarketPrice = function(name, itemID)
+				return Atr_GetAuctionPrice(name)
+			end
+			Auctionator_GetDisenchantPrice = function(itemLink, class, rarity)
+				return Atr_CalcDisenchantPrice(class, rarity, ItemUpgradeInfo:GetUpgradedItemLevel(itemLink)) -- Atr_GetDisenchantValue() is bugged cannot be used
+			end
+		elseif Auctionator and Auctionator.API and Auctionator.API.v1 then -- Auctionator original version for retail or classic
+			local GetAuctionPriceByItemID = Auctionator.API.v1.GetAuctionPriceByItemID
+			local GetDisenchantAuctionPrice = Auctionator.Enchant.GetDisenchantAuctionPrice
+			ItemUpgradeInfo = true
+			Auctionator_GetMarketPrice = function(name, itemID)
+				return GetAuctionPriceByItemID('KiwiFarm',itemID)
+			end
+			Auctionator_GetDisenchantPrice = function(itemLink, class, rarity)
+				return GetDisenchantAuctionPrice(itemLink)
 			end
 		end
 	end
