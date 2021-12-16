@@ -21,6 +21,9 @@ local versionStr = (versionToc=='@project-version@' and 'Dev' or versionToc)
 local serverKey = GetRealmName()
 local charKey   = UnitName("player") .. " - " .. serverKey
 
+-- player level
+local isPlayerLeveling = UnitLevel('player') < MAX_PLAYER_LEVEL_TABLE[GetAccountExpansionLevel()]
+
 -- default values
 local RESET_MAX = CLASSIC and 5 or 10
 local RESET_DAY = 30
@@ -93,6 +96,8 @@ local DEFAULT = {
 	total   = {},
 	daily   = {},
 	zone    = {},
+	-- leveling info per character
+	leveling = {},
 	-- fields blacklists
 	collect = { total = {}, daily = {}, zone = {} },
 	-- instances locks&resets per character
@@ -145,6 +150,8 @@ local GetZoneText = GetZoneText
 local IsInInstance = IsInInstance
 local GetInstanceInfo = GetInstanceInfo
 local GetItemInfo = GetItemInfo
+local UnitXP = UnitXP
+local UnitXPMax = UnitXPMax
 local COPPER_PER_GOLD = COPPER_PER_GOLD
 local COPPER_PER_SILVER = COPPER_PER_SILVER
 local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
@@ -157,6 +164,7 @@ local resetsd  -- config.resetsd
 local disabled -- config.disabled   texts table
 local notify   -- config.notify     notifications table
 local collect  -- config.collect
+local leveling -- config.leveling[charKey]  leveling info
 
 -- miscellaneous variables
 local inInstance
@@ -165,6 +173,7 @@ local combatActive
 local combatCurKills = 0
 local combatPreKills = 0
 local timeLootedItems = 0 -- track changes in config.lootedItems table
+local combatStartXP = 0
 
 -- main frame elements
 local texture -- background texture
@@ -701,25 +710,36 @@ do
 			text_mask   = text_mask   .. "%d\n"
 		end
 		-- gold cash & items
-		text_header = text_header .. L["Gold cash:\nGold items:\n"]
-		text_mask   = text_mask   .. "%s\n"  -- money cash
-		text_mask   = text_mask   .. "%s\n"  -- money items
-		-- gold by item quality
-		if not disabled.quality then
-			for i=0,5 do -- gold by qualities (poor to legendary)
-				text_header = text_header .. format(" %s\n",FmtQuality(i))
-				text_mask   = text_mask   .. "%s\n"
+		if not disabled.gold then
+			text_header = text_header .. L["Gold cash:\nGold items:\n"]
+			text_mask   = text_mask   .. "%s\n"  -- money cash
+			text_mask   = text_mask   .. "%s\n"  -- money items
+			-- gold by item quality
+			if not disabled.quality then
+				for i=0,5 do -- gold by qualities (poor to legendary)
+					text_header = text_header .. format(" %s\n",FmtQuality(i))
+					text_mask   = text_mask   .. "%s\n"
+				end
 			end
+			-- gold hour & total
+			text_header = text_header .. L["Gold/hour:\nGold total:\n"]
+			text_mask   = text_mask .. "%s\n" -- money per hour
+			text_mask   = text_mask .. "%s\n" -- money total
 		end
-		-- gold hour & total
-		text_header = text_header .. L["Gold/hour:\nGold total:"]
-		text_mask   = text_mask .. "%s\n" -- money per hour
-		text_mask   = text_mask .. "%s" -- money total
+		-- leveling xp
+		if isPlayerLeveling and not disabled.experience then
+			text_header = text_header .. L["XP/hour:\nXP remaining:\nXP last pull:\nXP level up:\n"]
+			text_mask  = text_mask .. "%.1fk\n" -- xp/hour
+			text_mask  = text_mask .. "%.1fk\n" -- xp remain
+			text_mask  = text_mask .. "%d\n"    -- xp last pull
+			text_mask  = text_mask .. "%dm\n"   -- xp ding time
+		end
 		textl:SetText(text_header)
 	end
 	-- refresh text
 	function RefreshText()
 		local curtime = time()
+		local xpEnabled = isPlayerLeveling and not disabled.experience
 		-- delete old data
 		local exptime = curtime - 3600
 		while (#resets>0 and resets[1].time<exptime) or #resets>RESET_MAX do -- remove old resets(>1hour)
@@ -736,10 +756,19 @@ do
 		-- zone text
 		data[#data+1] = ZoneTitle[curZoneName]
 		-- session duration
-		local sSession = curtime - (session.startTime or curtime) + (session.duration or 0)
+		local sSession
+		if session.startTime or session.duration then
+			sSession = curtime - (session.startTime or curtime) + (session.duration or 0)
+			data[#data+1] = (session.startTime and '|cFF00ff00') or (session.duration and '|cFFff8000') or '|cFFff0000'
+		elseif xpEnabled then
+			sSession = curtime - (leveling.startTime or curtime) + (leveling.duration or 0)
+			data[#data+1] = '|cFF00ffff'
+		else
+			sSession = 0
+			data[#data+1] = '|cFFff0000'
+		end
 		local m0, s0 = floor(sSession/60), sSession%60
 		local h0, m0 = floor(m0/60), m0%60
-		data[#data+1] = (session.startTime and '|cFF00ff00') or (session.duration and '|cFFff8000') or '|cFFff0000'
 		data[#data+1] = h0
 		data[#data+1] = m0
 		data[#data+1] = s0
@@ -771,20 +800,39 @@ do
 			data[#data+1] = session.countItems
 		end
 		-- gold info
-		data[#data+1] = FmtMoney(session.moneyCash)
-		data[#data+1] = FmtMoney(session.moneyItems)
-		if not disabled.quality then
-			for i=0,5 do
-				data[#data+1] = FmtMoney(session.moneyByQuality[i] or 0)
+		if not disabled.gold then
+			data[#data+1] = FmtMoney(session.moneyCash)
+			data[#data+1] = FmtMoney(session.moneyItems)
+			if not disabled.quality then
+				for i=0,5 do
+					data[#data+1] = FmtMoney(session.moneyByQuality[i] or 0)
+				end
 			end
+			local total = session.moneyCash+session.moneyItems
+			data[#data+1] = FmtMoney(sSession>0 and floor(total*3600/sSession) or 0)
+			data[#data+1] = FmtMoney(total)
 		end
-		local total = session.moneyCash+session.moneyItems
-		data[#data+1] = FmtMoney(sSession>0 and floor(total*3600/sSession) or 0)
-		data[#data+1] = FmtMoney(total)
+		-- leveling xp info
+		if xpEnabled then
+		    local xpMax = UnitXPMax("player")
+			local xpCur = UnitXP("player")
+			if xpCur<leveling.xpLastXP then
+				leveling.xpFromXP = leveling.xpFromXP-leveling.xpMaxXP
+				leveling.xpMaxXP  = xpMax
+			end
+			leveling.xpLastXP = xpCur
+			local xpDuration = curtime - leveling.startTime + (leveling.duration or 0)
+			local xpPerHour  = (xpCur - leveling.xpFromXP) / xpDuration * 3600
+			local xpRemain   = xpMax - xpCur
+			data[#data+1] = xpPerHour / 1000          -- xp/hour
+			data[#data+1] = xpRemain / 1000           -- remain xp to level up
+			data[#data+1] = leveling.xpLastPull or 0  -- xp last pull
+			data[#data+1] = xpPerHour>0 and xpRemain / xpPerHour * 60 or 0 -- remaining time to level up in minutes
+		end
 		-- set text
 		textr:SetFormattedText( text_mask, unpack(data) )
 		-- update timer status
-		local stopped = #resets==0 and not session.startTime
+		local stopped = (#resets==0 and not session.startTime) and (not xpEnabled)
 		if stopped ~= not timer:IsPlaying() then
 			if stopped then
 				timer:Stop()
@@ -818,8 +866,6 @@ end
 local function SessionStart(refresh)
 	if not session.startTime or refresh then
 		session.startTime = session.startTime or time()
-		addon:RegisterEvent("PLAYER_REGEN_DISABLED")
-		addon:RegisterEvent("PLAYER_REGEN_ENABLED")
 		addon:RegisterEvent("CHAT_MSG_LOOT")
 		addon:RegisterEvent("CHAT_MSG_MONEY")
 		RefreshText()
@@ -833,8 +879,6 @@ local function SessionStop()
 		session.duration = (session.duration or 0) + (curTime - (session.startTime or curTime))
 		session.startTime = nil
 		session.endTime = curTime
-		addon:UnregisterEvent("PLAYER_REGEN_DISABLED")
-		addon:UnregisterEvent("PLAYER_REGEN_ENABLED")
 		addon:UnregisterEvent("CHAT_MSG_LOOT")
 		addon:UnregisterEvent("CHAT_MSG_MONEY")
 	end
@@ -859,6 +903,45 @@ local function SessionFinish()
 		timeLootedItems = curTime
 		RefreshText()
 	end
+end
+
+-- leveling reset xp info
+local function LevelingReset()
+	leveling.startTime  = time()-1
+	leveling.duration   = nil
+	leveling.xpMaxXP    = UnitXPMax('player')
+	leveling.xpLastXP   = UnitXP('player')
+	leveling.xpFromXP   = leveling.xpLastXP
+	leveling.xpLastPull = nil
+end
+
+-- leveling continue
+local function LevelingContinue()
+	leveling.startTime = time()-1
+end
+
+-- leveling stop/pause
+local function LevelingStop()
+	if isPlayerLeveling then
+		local curTime = time()
+		leveling.duration = (leveling.duration or 0) + (curTime - (leveling.startTime or curTime))
+		leveling.startTime = nil
+	end
+end
+
+-- leveling init
+local function LevelingInit()
+	if isPlayerLeveling then -- player not max level ?
+		leveling = config.leveling[charKey] or {}
+		if not config.reloadUI then
+			if leveling.xpLastXP~=UnitXP('player') or leveling.xpMaxXP~=UnitXPMax('player') then
+				LevelingReset()
+			else
+				LevelingContinue()
+			end
+		end
+	end
+	config.leveling[charKey] = leveling -- assigning nil if player is at max level
 end
 
 -- restore main frame position
@@ -1034,11 +1117,20 @@ function addon:PLAYER_REGEN_DISABLED()
 	combatActive = true
 	combatPreKills = combatCurKills or combatPreKills
 	combatCurKills = nil
+	if isPlayerLeveling then
+		combatStartXP = UnitXP('player')
+	end
 end
 
 -- combat end
 function addon:PLAYER_REGEN_ENABLED()
 	combatActive = nil
+	if isPlayerLeveling then
+		local pullXP = UnitXP('player') - combatStartXP
+		if pullXP>0 then
+			leveling.xpLastPull = pullXP
+		end
+	end
 end
 
 -- zones management
@@ -1088,6 +1180,7 @@ do
 		if isLogout then
 			LockResetAll() -- we must reset all used instances on logout
 			SessionStop()
+			LevelingStop()
 		end
 		config.reloadUI = not isLogout or nil
 	end
@@ -1170,6 +1263,8 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	for k,v in next, config.daily do
 		if k<key then config.daily[k] = nil; end
 	end
+	-- init leveling session
+	LevelingInit()
 	-- minimap icon
 	LibStub("LibDBIcon-1.0"):Register(addonName, LibStub("LibDataBroker-1.1"):NewDataObject(addonName, {
 		type  = "launcher",
@@ -1199,6 +1294,8 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	}) , config.minimapIcon)
 	-- events
 	addon:SetScript('OnEvent', function(self,event,...) self[event](self,event,...) end)
+	addon:RegisterEvent("PLAYER_REGEN_DISABLED")
+	addon:RegisterEvent("PLAYER_REGEN_ENABLED")
 	addon:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
 	addon:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 	addon:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -1985,6 +2082,7 @@ do
 		{ text = getSessionText,       notCheckable = true, func = setSession },
 		{ text = L['Session Finish'],     notCheckable = true, disabled = function() return not (session.startTime or session.duration) end, func = SessionFinish },
 		{ text = L['Reset Instances'],    notCheckable = true, func = ResetInstances },
+		{ text = L['Reset XP Info'],      notCheckable = true, func = LevelingReset },
 		{ text = L['Statistics'],         notCheckable = true, isTitle = true },
 		{ text = L['Session'],            notCheckable = true, hasArrow = true, value = 'session', menuList = menuStats },
 		{ text = L['Daily'],              notCheckable = true, hasArrow = true, menuList = menuDaily },
@@ -1992,6 +2090,13 @@ do
 		{ text = L['Totals'],             notCheckable = true, hasArrow = true, value = 'total',   menuList = menuStats },
 		{ text = L['Resets'],             notCheckable = true, hasArrow = true, menuList = menuResets },
 		{ text = L['Settings'],           notCheckable = true, isTitle = true },
+		{ text = L['Display Info'], notCheckable= true, hasArrow = true, menuList = {
+			{ text = L['Lock&Resets'],      value = 'reset',      isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+			{ text = L['Mobs&Items Count'], value = 'count',      isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+			{ text = L['Gold by Quality'],  value = 'quality',    isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+			{ text = L['Gold Earned'],      value = 'gold',       isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+			{ text = L['Leveling XP Info'], value = 'experience', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+		} },
 		{ text = L['Prices of Items'], notCheckable = true, hasArrow = true, menuList = {
 			{ text = FmtQuality(0), value = 0, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
 			{ text = FmtQuality(1), value = 1, notCheckable= true, hasArrow = true, menuList = menuQualitySources },
@@ -2016,11 +2121,6 @@ do
 			{ text = L['Money looted'], value = 'money', notCheckable = true, hasArrow = true, menuList = menuNotify },
 		} },
 		{ text = L['Miscellaneous'], notCheckable= true, hasArrow = true, menuList = {
-			{ text = L['Display Info'], notCheckable= true, hasArrow = true, menuList = {
-				{ text = L['Lock&Resets'],      value = 'reset',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
-				{ text = L['Mobs&Items Count'], value = 'count',   isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
-				{ text = L['Gold by Quality'],  value = 'quality', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
-			} },
 			{ text = L['Money Format'], notCheckable = true, hasArrow = true, menuList = {
 				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r 99|cffeda55fc|r', value = '', 							    checked = MoneyFmtChecked, func = SetMoneyFmt },
 				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 				 value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
