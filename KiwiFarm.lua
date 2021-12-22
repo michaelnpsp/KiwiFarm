@@ -933,7 +933,7 @@ end
 local function LevelingInit()
 	if isPlayerLeveling then -- player not max level ?
 		leveling = config.leveling[charKey] or {}
-		if not config.reloadUI then
+		if not leveling.startTime then
 			if leveling.xpLastXP~=UnitXP('player') or leveling.xpMaxXP~=UnitXPMax('player') then
 				LevelingReset()
 			else
