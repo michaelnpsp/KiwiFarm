@@ -256,6 +256,11 @@ local function GetDailyDB(datetime)
 	return data
 end
 
+local function IsDungeon()
+	local _,typ = GetInstanceInfo()
+	return typ=='party' or typ=='raid'
+end
+
 local ZoneTitle
 do
 	local strcut
@@ -1191,7 +1196,7 @@ end
 function addon:COMBAT_LOG_EVENT_UNFILTERED()
 	local _, eventType,_,_,_,_,_,dstGUID,dstName,dstFlags = CombatLogGetCurrentEventInfo()
 	if eventType == 'UNIT_DIED' and band(dstFlags,COMBATLOG_OBJECT_CONTROL_NPC)~=0 then
-		if inInstance and not resets[curZoneName] then
+		if inInstance and not resets[curZoneName] and IsDungeon() then
 			LockAddInstance(curZoneName) -- register used instance
 			timer:Play()
 		end
