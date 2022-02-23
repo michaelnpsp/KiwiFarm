@@ -21,8 +21,19 @@ local versionStr = (versionToc=='@project-version@' and 'Dev' or versionToc)
 local serverKey = GetRealmName()
 local charKey   = UnitName("player") .. " - " .. serverKey
 
--- player level
-local isPlayerLeveling = UnitLevel('player') < MAX_PLAYER_LEVEL_TABLE[GetAccountExpansionLevel()]
+-- max player level by exapansion (not using game table because does not exist in Shadowlands)
+local MAX_PLAYER_LEVEL_TABLE = {
+	[0] = 60,  -- Vanilla
+	[1] = 70,  -- TBC
+	[2] = 80,  -- Wotlk
+	[3] = 95,  -- Cataclism
+	[4] = 90,  -- MoP
+	[5] = 100, -- WoD
+	[6] = 110, -- Legion
+	[7] = 120, -- BoA,
+	[8] = 60,  -- ShadowLands
+}
+local isPlayerLeveling = UnitLevel('player') < MAX_PLAYER_LEVEL_TABLE[GetExpansionLevel()]
 
 -- default values
 local RESET_MAX = CLASSIC and 5 or 10
