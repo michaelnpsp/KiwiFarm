@@ -11,7 +11,7 @@ local addon = CreateFrame('Frame', "KiwiFarm", UIParent)
 local L = LibStub('AceLocale-3.0'):GetLocale('KiwiFarm', true)
 
 -- game version
-local CLASSIC = select(4,GetBuildInfo())<30000
+local CLASSIC = select(4,GetBuildInfo())<40000
 
 -- addon version
 local versionToc = GetAddOnMetadata(addonName, "Version")

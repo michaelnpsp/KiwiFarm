@@ -1,9 +1,20 @@
 name: Build KiwiFarm
 
 on:
-  push:
-    tags:
-      - '**'
+  workflow_dispatch:
+    inputs:
+      retail:
+        type: boolean
+        description: Retail
+      wrath:
+        type: boolean
+        description: Wrath
+      bcc:
+        type: boolean
+        description: Burning
+      classic:
+        type: boolean
+        description: Classic
 
 jobs:
   build:
@@ -15,6 +26,7 @@ jobs:
           fetch-depth: 200
 
       - name: Create Retail Package
+        if: ${{ inputs.retail }}
         uses: BigWigsMods/packager@master
         with:
           args: -g retail -m .pkgmeta-retail
@@ -24,6 +36,17 @@ jobs:
           WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
 
       - name: Create BCC Package
+        if: ${{ inputs.wrath }}
+        uses: BigWigsMods/packager@master
+        with:
+          args: -g wrath -m .pkgmeta-classic
+        env:
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+
+      - name: Create BCC Package
+        if: ${{ inputs.bcc }}
         uses: BigWigsMods/packager@master
         with:
           args: -g bcc -m .pkgmeta-classic
@@ -33,6 +56,7 @@ jobs:
           WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
 
       - name: Create Vanilla Package
+        if: ${{ inputs.classic }}
         uses: BigWigsMods/packager@master
         with:
           args: -g classic -m .pkgmeta-classic
