@@ -11,7 +11,8 @@ local addon = CreateFrame('Frame', "KiwiFarm", UIParent)
 local L = LibStub('AceLocale-3.0'):GetLocale('KiwiFarm', true)
 
 -- game version
-local CLASSIC = select(4,GetBuildInfo())<40000
+local VERSION = select(4,GetBuildInfo())
+local CLASSIC = VERSION<40000
 
 -- addon version
 local versionToc = GetAddOnMetadata(addonName, "Version")
@@ -521,7 +522,7 @@ end
 
 -- items & price functions
 local IsEnchantingMat
-if CLASSIC then
+if VERSION<30000 then -- Vanilla or Burning Crusade
 	local ENCHANTING = {
 		[10940] = true, [11134] = true, [16203] = true,	[11135] = true, [11174] = true,	[14344] = true,
 		[11082] = true, [11137] = true,	[11083] = true,	[10998] = true,	[20725] = true,	[11138] = true,
