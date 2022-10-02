@@ -833,18 +833,25 @@ do
 		if xpEnabled then
 		    local xpMax = UnitXPMax("player")
 			local xpCur = UnitXP("player")
-			if xpCur<leveling.xpLastXP then
-				leveling.xpFromXP = leveling.xpFromXP-leveling.xpMaxXP
-				leveling.xpMaxXP  = xpMax
+			if xpMax>0 then -- workaround to blizzard bug, xp functions return 0 for an instant when player is dead and click Release Spirit
+				if xpCur<leveling.xpLastXP then
+					leveling.xpFromXP = leveling.xpFromXP-leveling.xpMaxXP
+					leveling.xpMaxXP  = xpMax
+				end
+				leveling.xpLastXP = xpCur
+				local xpDuration = curtime - leveling.startTime + (leveling.duration or 0)
+				local xpPerHour  = (xpCur - leveling.xpFromXP) / xpDuration * 3600
+				local xpRemain   = xpMax - xpCur
+				data[#data+1] = xpPerHour / 1000          -- xp/hour
+				data[#data+1] = xpRemain / 1000           -- remain xp to level up
+				data[#data+1] = leveling.xpLastPull or 0  -- xp last pull
+				data[#data+1] = xpPerHour>0 and xpRemain / xpPerHour * 60 or 0 -- remaining time to level up in minutes
+			else -- game returned wrong data set all zero
+				data[#data+1] = 0
+				data[#data+1] = 0
+				data[#data+1] = 0
+				data[#data+1] = 0
 			end
-			leveling.xpLastXP = xpCur
-			local xpDuration = curtime - leveling.startTime + (leveling.duration or 0)
-			local xpPerHour  = (xpCur - leveling.xpFromXP) / xpDuration * 3600
-			local xpRemain   = xpMax - xpCur
-			data[#data+1] = xpPerHour / 1000          -- xp/hour
-			data[#data+1] = xpRemain / 1000           -- remain xp to level up
-			data[#data+1] = leveling.xpLastPull or 0  -- xp last pull
-			data[#data+1] = xpPerHour>0 and xpRemain / xpPerHour * 60 or 0 -- remaining time to level up in minutes
 		end
 		-- set text
 		textr:SetFormattedText( text_mask, unpack(data) )
