@@ -770,7 +770,7 @@ do
 			text_mask  = text_mask .. "%.1fk\n" -- xp/hour
 			text_mask  = text_mask .. "%.1fk\n" -- xp remain
 			text_mask  = text_mask .. "%d\n"    -- xp last pull
-			text_mask  = text_mask .. "%dm\n"   -- xp ding time
+			text_mask  = text_mask .. "%s\n"   -- xp ding time
 		end
 		textl:SetText(text_header)
 	end
@@ -869,7 +869,13 @@ do
 				data[#data+1] = xpPerHour / 1000          -- xp/hour
 				data[#data+1] = xpRemain / 1000           -- remain xp to level up
 				data[#data+1] = leveling.xpLastPull or 0  -- xp last pull
-				data[#data+1] = xpPerHour>0 and xpRemain / xpPerHour * 60 or 0 -- remaining time to level up in minutes
+				local minutes = xpPerHour>0 and xpRemain / xpPerHour * 60 or 0
+				if minutes>=60 then
+					local hours = floor(minutes / 60)
+					data[#data+1] = format("%dh %02dm", hours, minutes - hours*60)
+				else
+					data[#data+1] = format("%dm",minutes)
+				end
 			else -- game returned wrong data set all zero
 				data[#data+1] = 0
 				data[#data+1] = 0
