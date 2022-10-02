@@ -866,17 +866,12 @@ do
 				local xpDuration = curtime - leveling.startTime + (leveling.duration or 0)
 				local xpPerHour  = (xpCur - leveling.xpFromXP) / xpDuration * 3600
 				local xpRemain   = xpMax - xpCur
+				local minutes    = xpPerHour>0 and xpRemain / xpPerHour * 60 or 0
 				data[#data+1] = xpPerHour / 1000          -- xp/hour
 				data[#data+1] = xpRemain / 1000           -- remain xp to level up
 				data[#data+1] = leveling.xpLastPull or 0  -- xp last pull
-				local minutes = xpPerHour>0 and xpRemain / xpPerHour * 60 or 0
-				if minutes>=60 then
-					local hours = floor(minutes / 60)
-					data[#data+1] = format("%dh %02dm", hours, minutes - hours*60)
-				else
-					data[#data+1] = format("%dm",minutes)
-				end
-			else -- game returned wrong data set all zero
+				data[#data+1] = minutes>=60 and format("%dh %02dm", minutes/60, minutes%60) or format("%dm", minutes)
+			else -- game returned wrong data, set all zero
 				data[#data+1] = 0
 				data[#data+1] = 0
 				data[#data+1] = 0
