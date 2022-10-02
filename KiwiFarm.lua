@@ -2163,7 +2163,7 @@ do
 			{ text = L['Mobs&Items Count'], value = 'count',      isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 			{ text = L['Gold Earned'],      value = 'gold',       isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 			{ text = L['Gold by Quality'],  value = 'quality',    isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
-			{ text = L['Gold Quests'],      value = 'quests',     isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+			{ text = L['Gold quests'],      value = 'quests',     isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 			{ text = L['Leveling XP Info'], value = 'experience', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 		} },
 		{ text = L['Prices of Items'], notCheckable = true, hasArrow = true, menuList = {
