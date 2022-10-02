@@ -91,6 +91,7 @@ local DEFDATA = {
 	-- money
 	moneyCash      = 0,
 	moneyItems     = 0,
+	moneyQuests    = 0,
 	moneyByQuality = {},
 	-- items
 	countItems     = 0,
@@ -213,25 +214,41 @@ local function InitDB(dst, src, reset, norecurse)
 	return dst
 end
 
-local UpdateDB = CLASSIC and function(config)
-	local data = config.resetData
-	local char = data[charKey] or DEFRESET
-	if config.resets then -- move resets per realm to resets per char (due to blizzard hotfix) but only in classic version
-		char.resets = config.resets or char.resets
-		config.resets  = nil
+local UpdateDB
+do
+	local function UpdateDB2(config)
+		if not config.__version then
+			for k,v in pairs(config.zone) do
+				v.moneyQuests = v.moneyQuests or 0
+			end
+			for k,v in pairs(config.daily) do
+				v.moneyQuests = v.moneyQuests or 0
+			end
+			config.__version = 1
+		end
 	end
-	if config.resetsd then -- move resets per realm to resets per char (due to blizzard hotfix) but only in classic version
-		char.resetsd = config.resetsd or char.resetsd
-		config.resetsd = nil
+	UpdateDB = CLASSIC and function(config)
+		local data = config.resetData
+		local char = data[charKey] or DEFRESET
+		if config.resets then -- move resets per realm to resets per char (due to blizzard hotfix) but only in classic version
+			char.resets = config.resets or char.resets
+			config.resets  = nil
+		end
+		if config.resetsd then -- move resets per realm to resets per char (due to blizzard hotfix) but only in classic version
+			char.resetsd = config.resetsd or char.resetsd
+			config.resetsd = nil
+		end
+		char.resets.count  = char.resets.count  or 0
+		char.resets.countd = char.resets.countd or 0
+		data[charKey] = char
+		UpdateDB2(config)
+	end or function(config)
+		config.resets  = config.resets  or {}
+		config.resetsd = config.resetsd or {}
+		config.resets.count  = config.resets.count  or 0
+		config.resets.countd = config.resets.countd or 0
+		UpdateDB2(config)
 	end
-	char.resets.count  = char.resets.count  or 0
-	char.resets.countd = char.resets.countd or 0
-	data[charKey] = char
-end or function(config)
-	config.resets  = config.resets  or {}
-	config.resetsd = config.resetsd or {}
-	config.resets.count  = config.resets.count  or 0
-	config.resets.countd = config.resets.countd or 0
 end
 
 local function AddDB(dst, src, blacklist)
@@ -303,11 +320,11 @@ end
 local function GetSessionGeneralStats()
 	local curtime  = time()
 	local duration = curtime - (session.startTime or curtime) + (session.duration or 0)
-	local total    = session.moneyCash+session.moneyItems
+	local total    = session.moneyCash+session.moneyItems+session.moneyQuests
 	local hourly   = duration>0 and floor(total*3600/duration) or 0
 	local m0, s0   = floor(duration/60), duration%60
 	local h0, m0   = floor(m0/60), m0%60
-	return total, hourly, session.moneyCash, session.moneyItems, h0, m0, s0
+	return total, hourly, session.moneyCash, session.moneyItems, session.moneyQuests, h0, m0, s0
 end
 
 -- text format functions
@@ -728,6 +745,10 @@ do
 		end
 		-- gold cash & items
 		if not disabled.gold then
+			if not disabled.quests then
+				text_header = text_header .. L["Gold quests:\n"]
+				text_mask   = text_mask   .. "%s\n"  -- money quests
+			end
 			text_header = text_header .. L["Gold cash:\nGold items:\n"]
 			text_mask   = text_mask   .. "%s\n"  -- money cash
 			text_mask   = text_mask   .. "%s\n"  -- money items
@@ -818,6 +839,9 @@ do
 		end
 		-- gold info
 		if not disabled.gold then
+			if not disabled.quests then
+				data[#data+1] = FmtMoney(session.moneyQuests)
+			end
 			data[#data+1] = FmtMoney(session.moneyCash)
 			data[#data+1] = FmtMoney(session.moneyItems)
 			if not disabled.quality then
@@ -825,7 +849,7 @@ do
 					data[#data+1] = FmtMoney(session.moneyByQuality[i] or 0)
 				end
 			end
-			local total = session.moneyCash+session.moneyItems
+			local total = session.moneyCash+session.moneyItems+session.moneyQuests
 			data[#data+1] = FmtMoney(sSession>0 and floor(total*3600/sSession) or 0)
 			data[#data+1] = FmtMoney(total)
 		end
@@ -892,6 +916,7 @@ local function SessionStart(refresh)
 		session.startTime = session.startTime or time()
 		addon:RegisterEvent("CHAT_MSG_LOOT")
 		addon:RegisterEvent("CHAT_MSG_MONEY")
+		addon:RegisterEvent("QUEST_TURNED_IN")
 		RefreshText()
 	end
 end
@@ -905,6 +930,7 @@ local function SessionStop()
 		session.endTime = curTime
 		addon:UnregisterEvent("CHAT_MSG_LOOT")
 		addon:UnregisterEvent("CHAT_MSG_MONEY")
+		addon:UnregisterEvent("QUEST_TURNED_IN")
 	end
 end
 
@@ -917,7 +943,7 @@ local function SessionFinish()
 		session.startTime = nil
 		session.endTime   = nil
 		session.zoneName  = nil
-		if session.moneyCash>0 or session.moneyItems>0 or session.countItems>0 or session.countMobs>0 then
+		if session.moneyCash>0 or session.moneyItems>0 or session.moneyQuests>0 or session.countItems>0 or session.countMobs>0 then
 			AddDB(config.total, session, collect.total)
 			AddDB(GetDailyDB(curTime), session, collect.daily)
 			AddDB(GetZoneDB(zoneName), session, collect.zone)
@@ -1136,6 +1162,20 @@ do
 	end
 end
 
+-- gold awarded in quests
+function addon:QUEST_TURNED_IN(event,_,_,money)
+	if disabled.quests then return end
+	session.moneyQuests = session.moneyQuests + money
+	-- register zone if necessary
+	if not session.zoneName then
+		session.zoneName = curZoneName
+	end
+	-- notify
+	if notify.money then
+		Notify('money', nil, nil, money); NotifyEnd()
+	end
+end
+
 -- combat start
 function addon:PLAYER_REGEN_DISABLED()
 	combatActive = true
@@ -1304,10 +1344,11 @@ addon:SetScript("OnEvent", function(frame, event, name)
 		OnTooltipShow = function(tooltip)
 			tooltip:AddDoubleLine("KiwiFarm", versionStr)
 			if session.startTime or session.duration then
-				local total, hourly, cash, items, hh, mm = GetSessionGeneralStats()
+				local total, hourly, cash, quests, items, hh, mm = GetSessionGeneralStats()
 				local cc = session.startTime and '|cFF00ff00' or '|cFFff8000'
 				local ss = hh>0 and format("%s%dh %dm|r",cc,hh,mm) or format("%s%dm|r",cc,mm)
 				tooltip:AddDoubleLine(L["Session:"],    ss, 1,1,1)
+				tooltip:AddDoubleLine(L["Gold quests:"], FmtMoney(quests),  1,1,1, 1,1,1)
 				tooltip:AddDoubleLine(L["Gold cash:"],  FmtMoney(cash),   1,1,1, 1,1,1)
 				tooltip:AddDoubleLine(L["Gold items:"], FmtMoney(items),  1,1,1, 1,1,1)
 				tooltip:AddDoubleLine(L["Gold/hour:"],  FmtMoney(hourly), 1,1,1, 1,1,1)
@@ -1963,10 +2004,11 @@ do
 			SendChatMessage( format(L["Farm Time: %s"], FmtDuration(stats_duration)), channel, nil, player )
 			SendChatMessage( format(L["Mobs killed: %d"], stats.countMobs), channel, nil, player )
 			SendChatMessage( format(L["Items looted: %d"], stats.countItems), channel, nil, player )
+			SendChatMessage( format(L["Gold quests: %s"], FmtMoneyPlain(stats.moneyQuests)),  channel, nil, player )
 			SendChatMessage( format(L["Gold cash: %s"], FmtMoneyPlain(stats.moneyCash)),  channel, nil, player )
 			SendChatMessage( format(L["Gold items: %s"], FmtMoneyPlain(stats.moneyItems)), channel, nil, player )
 			SendChatMessage( format(L["Gold/hour: %s"], FmtMoneyPlain(stats_goldhour)),  channel, nil, player )
-			SendChatMessage( format(L["Gold total: %s"], FmtMoneyPlain(stats.moneyCash+stats.moneyItems)), channel, nil, player )
+			SendChatMessage( format(L["Gold total: %s"], FmtMoneyPlain(stats.moneyCash+stats.moneyItems+stats.moneyQuests)), channel, nil, player )
 		end
 		local function reportChannel(info)
 			reportStats(info.value)
@@ -1994,6 +2036,7 @@ do
 		{ notCheckable = true },
 		{ notCheckable = true },
 		{ notCheckable = true },
+		{ notCheckable = true },
 		{ text = L['Looted Items'], notCheckable = true, hasArrow = true, menuList = menuGoldQuality },
 		{ text = L['Killed Mobs'],  notCheckable = true, hasArrow = true, menuList = menuKilledMobs  },
 		{ text = L['Maintenance'],  notCheckable = true, hasArrow = true, menuList = menuStatsMisc   },
@@ -2002,17 +2045,18 @@ do
 			local curTime = time()
 			local field = getMenuValue(level)
 			stats = config[field] or field
-			local money = stats.moneyCash+stats.moneyItems
+			local money = stats.moneyCash+stats.moneyItems+stats.moneyQuests
 			local duration = curTime - (stats.startTime or curTime) + (stats.duration or 0)
 			local mhour = duration>0 and floor(money*3600/duration) or 0
 			local ftime = (stats.duration or 0) + curTime - (stats.startTime or curTime)
 			menu[1].text = format(L["Farm Time: %s"], FmtDuration(ftime))
-			menu[2].text = format(L["Gold cash: %s"], FmtMoney(stats.moneyCash))
-			menu[3].text = format(L["Gold items: %s"], FmtMoney(stats.moneyItems))
-			menu[4].text = format(L["Gold/hour: %s"], FmtMoney(mhour))
-			menu[5].text = format(L["Gold total: %s"], FmtMoney(money))
-			menu[6].text = format(L["Items looted (%d)"], stats.countItems)
-			menu[7].text = format(L["Mobs killed (%d)"], stats.countMobs)
+			menu[2].text = format(L["Gold quests: %s"], FmtMoney(stats.moneyQuests))
+			menu[3].text = format(L["Gold cash: %s"], FmtMoney(stats.moneyCash))
+			menu[4].text = format(L["Gold items: %s"], FmtMoney(stats.moneyItems))
+			menu[5].text = format(L["Gold/hour: %s"], FmtMoney(mhour))
+			menu[6].text = format(L["Gold total: %s"], FmtMoney(money))
+			menu[7].text = format(L["Items looted (%d)"], stats.countItems)
+			menu[8].text = format(L["Mobs killed (%d)"], stats.countMobs)
 			stats_duration, stats_goldhour = ftime, mhour
 			timeLootedItems = curTime
 		end,
@@ -2026,7 +2070,7 @@ do
 			key, pre = date("%Y/%m/%d", tim), pre and date("%m/%d", tim) or L['Today']
 			local data = config.daily[key]
 			if data then
-				local money = data and data.moneyCash+data.moneyItems or 0
+				local money = data and data.moneyCash+data.moneyItems+data.moneyQuests or 0
 				defMenuAdd(menu, format('%s: %s', pre, FmtMoney(money)), data, menuStats)
 			else
 				defMenuAdd(menu, format('%s: -', pre))
@@ -2117,8 +2161,9 @@ do
 		{ text = L['Display Info'], notCheckable= true, hasArrow = true, menuList = {
 			{ text = L['Lock&Resets'],      value = 'reset',      isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 			{ text = L['Mobs&Items Count'], value = 'count',      isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
-			{ text = L['Gold by Quality'],  value = 'quality',    isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 			{ text = L['Gold Earned'],      value = 'gold',       isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+			{ text = L['Gold by Quality'],  value = 'quality',    isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
+			{ text = L['Gold Quests'],      value = 'quests',     isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 			{ text = L['Leveling XP Info'], value = 'experience', isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 		} },
 		{ text = L['Prices of Items'], notCheckable = true, hasArrow = true, menuList = {
