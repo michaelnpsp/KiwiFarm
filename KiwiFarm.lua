@@ -570,6 +570,7 @@ do
 				return Atr_CalcDisenchantPrice(class, rarity, ItemUpgradeInfo:GetUpgradedItemLevel(itemLink)) -- Atr_GetDisenchantValue() is bugged cannot be used
 			end
 		elseif Auctionator and Auctionator.API and Auctionator.API.v1 then -- Auctionator original version for retail or classic
+			local itemInfoCache = {}
 			local GetAuctionPriceByItemID = Auctionator.API.v1.GetAuctionPriceByItemID
 			local GetDisenchantAuctionPrice = Auctionator.Enchant.GetDisenchantAuctionPrice
 			ItemUpgradeInfo = true
@@ -577,7 +578,9 @@ do
 				return GetAuctionPriceByItemID('KiwiFarm',itemID)
 			end
 			Auctionator_GetDisenchantPrice = function(itemLink, class, rarity)
-				return GetDisenchantAuctionPrice(itemLink, GetItemInfo(itemLink))
+				itemInfoCache[3]  = rarity -- Auctionator GetDisenchantAuctionPrice()
+				itemInfoCache[12] = class  -- only uses itemInfo rarity and class (see GetItemInfo() game API)
+				return GetDisenchantAuctionPrice(itemLink, itemInfoCache)
 			end
 		end
 	end
@@ -1100,7 +1103,7 @@ do
 		for _,pattern in ipairs(loot_patterns) do
 			local itemLink, quantity = strmatch(msg, pattern)
 			if itemLink then
-				return itemLink, quantity or 1
+				return itemLink, tonumber(quantity) or 1
 			end
 		end
 	end
