@@ -577,7 +577,7 @@ do
 				return GetAuctionPriceByItemID('KiwiFarm',itemID)
 			end
 			Auctionator_GetDisenchantPrice = function(itemLink, class, rarity)
-				return GetDisenchantAuctionPrice(itemLink)
+				return GetDisenchantAuctionPrice(itemLink, GetItemInfo(itemLink))
 			end
 		end
 	end
