@@ -111,3 +111,8 @@ L['Gold quests: %s'] = 'Oro misiones: %s'
 L['XP/hour:\nXP remaining:\nXP last pull:\nXP level up:\n'] = 'XP/hora:\nXP restante:\nXP último pull:\nXP subir:\n'
 L['Gold Earned'] = 'Oro Ganado'
 L['Leveling XP Info'] = 'Leveo XP Info'
+
+L['Chat Text Frame'] = 'Ventana de Chat'
+L['Default'] = 'Por defecto'
+L['Chat Frame'] = 'Ventana de Chat'
+L['Identify Chat Frames'] = 'Identificar Ventanas de Chat'

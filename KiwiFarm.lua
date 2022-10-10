@@ -490,7 +490,13 @@ do
 	local notified = {}
 	local channels = {
 		chat = function(itemLink, quantity, money)
-			print( fmtLoot(itemLink, quantity, money, true) )
+			local m = fmtLoot(itemLink, quantity, money, true)
+			local f = config.chatFrame and _G['ChatFrame'..config.chatFrame]
+			if f then
+				f:AddMessage(m)
+			else
+				print(m)
+			end
 		end,
 		combat = function(itemLink, quantity, money)
 			if CombatText_AddMessage then
@@ -570,17 +576,14 @@ do
 				return Atr_CalcDisenchantPrice(class, rarity, ItemUpgradeInfo:GetUpgradedItemLevel(itemLink)) -- Atr_GetDisenchantValue() is bugged cannot be used
 			end
 		elseif Auctionator and Auctionator.API and Auctionator.API.v1 then -- Auctionator original version for retail or classic
-			local itemInfoCache = {}
 			local GetAuctionPriceByItemID = Auctionator.API.v1.GetAuctionPriceByItemID
-			local GetDisenchantAuctionPrice = Auctionator.Enchant.GetDisenchantAuctionPrice
+			local GetDisenchantAuctionPrice = Auctionator.API.v1.GetDisenchantPriceByItemLink
 			ItemUpgradeInfo = true
-			Auctionator_GetMarketPrice = function(name, itemID)
+			Auctionator_GetMarketPrice = function(_, itemID)
 				return GetAuctionPriceByItemID('KiwiFarm',itemID)
 			end
-			Auctionator_GetDisenchantPrice = function(itemLink, class, rarity)
-				itemInfoCache[3]  = rarity -- Auctionator GetDisenchantAuctionPrice()
-				itemInfoCache[12] = class  -- only uses itemInfo rarity and class (see GetItemInfo() game API)
-				return GetDisenchantAuctionPrice(itemLink, itemInfoCache)
+			Auctionator_GetDisenchantPrice = function(itemLink)
+				return GetDisenchantAuctionPrice('KiwiFarm', itemLink)
 			end
 		end
 	end
@@ -1611,6 +1614,19 @@ do
 		SavePosition()
 		RestorePosition()
 	end
+	local function ChatFrameIdentify()
+		print('|cFF7FFF72KiwiFarm:|r This is Chat Frame: Default')
+		for i=1,10 do
+			local f = _G['ChatFrame'..i]
+			if f then f:AddMessage( '|cFF7FFF72KiwiFarm:|r This is Chat Frame: '..i ) end
+		end
+	end
+	local function ChatFrameChecked(info)
+		return info.value == (config.chatFrame or 0)
+	end
+	local function SetChatFrame(info)
+		config.chatFrame = info.value~=0 and info.value or nil
+	end
 	local function MoneyFmtChecked(info)
 		return info.value == (config.moneyFmt or '')
 	end
@@ -2194,6 +2210,20 @@ do
 			{ text = L['Money looted'], value = 'money', notCheckable = true, hasArrow = true, menuList = menuNotify },
 		} },
 		{ text = L['Miscellaneous'], notCheckable= true, hasArrow = true, menuList = {
+			{ text = L['Chat Text Frame'], notCheckable = true, hasArrow = true, menuList = {
+				{ text = L['Default'],         value =  0, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 1',  value =  1, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 2',  value =  2, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 3',  value =  3, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 4',  value =  4, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 5',  value =  5, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 6',  value =  6, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 7',  value =  7, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 8',  value =  8, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 9',  value =  9, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 10', value = 10, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Identify Chat Frames'], notCheckable = true, func = ChatFrameIdentify },
+			} },
 			{ text = L['Money Format'], notCheckable = true, hasArrow = true, menuList = {
 				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r 99|cffeda55fc|r', value = '', 							    checked = MoneyFmtChecked, func = SetMoneyFmt },
 				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 				 value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },

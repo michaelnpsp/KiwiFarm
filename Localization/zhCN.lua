@@ -105,10 +105,16 @@ L['Text Size'] = '字体大小'
 L['Default (14)'] = '默认（14）'
 L['Background color '] = '背景色'
 L['Hide Window'] = '隐藏'
-
+-- TODO
 L['Gold quests'] = 'Gold quests'
 L['Gold quests:\n'] = 'Gold quests:\n'
 L['Gold quests: %s'] = 'Gold quests: %s'
 L['XP/hour:\nXP remaining:\nXP last pull:\nXP level up:\n'] = 'XP/hour:\nXP remaining:\nXP last pull:\nXP level up:\n'
 L['Gold Earned'] = 'Gold Earned'
 L['Leveling XP Info'] = 'Leveling XP Info'
+
+L['Chat Text Frame'] = 'Chat Text Frame'
+L['Default'] = 'Default'
+L['Chat Frame'] = 'Chat Frame'
+L['Identify Chat Frames'] = 'Identify Chat Frames'
+
