@@ -930,8 +930,8 @@ end
 
 -- session stop
 local function SessionStop()
+	local curTime = time()
 	if session.startTime then
-		local curTime = time()
 		session.duration = (session.duration or 0) + (curTime - (session.startTime or curTime))
 		session.startTime = nil
 		session.endTime = curTime
@@ -939,15 +939,14 @@ local function SessionStop()
 		addon:UnregisterEvent("CHAT_MSG_MONEY")
 		addon:UnregisterEvent("QUEST_TURNED_IN")
 	end
+	return curTime
 end
 
 -- session finish
 local function SessionFinish()
 	if session.startTime or session.duration then
-		local curTime     = time()
+		local curTime     = SessionStop()
 		local zoneName    = session.zoneName or curZoneName
-		session.duration  = (session.duration or 0) + (curTime - (session.startTime or curTime))
-		session.startTime = nil
 		session.endTime   = nil
 		session.zoneName  = nil
 		if session.moneyCash>0 or session.moneyItems>0 or session.moneyQuests>0 or session.countItems>0 or session.countMobs>0 then
