@@ -16,7 +16,7 @@ local CLASSIC = VERSION<40000
 
 -- addon version
 local versionToc = GetAddOnMetadata(addonName, "Version")
-local versionStr = (versionToc=='@project-version@' and 'Dev' or versionToc)
+local versionStr = (versionToc=='\@project-version\@' and 'Dev' or versionToc)
 
 -- database keys
 local serverKey = GetRealmName()
