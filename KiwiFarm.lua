@@ -33,8 +33,9 @@ local MAX_PLAYER_LEVEL_TABLE = {
 	[6] = 110, -- Legion
 	[7] = 120, -- BoA,
 	[8] = 60,  -- ShadowLands
+	[9] = 70,  -- Dragonflight
 }
-local isPlayerLeveling = UnitLevel('player') < MAX_PLAYER_LEVEL_TABLE[GetExpansionLevel()]
+local isPlayerLeveling = UnitLevel('player') < (MAX_PLAYER_LEVEL_TABLE[GetExpansionLevel()] or 0)
 
 -- default values
 local RESET_MAX = CLASSIC and 5 or 10
