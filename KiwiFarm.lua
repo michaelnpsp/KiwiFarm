@@ -1589,7 +1589,7 @@ do
 	local function InitPriceSources(menu)
 		for i=#menu,1,-1 do
 			local arg = menu[i].arg1
-			if (arg =='Atr' and not Atr_GetAuctionPrice and not Auctionator) or (arg =='TSM' and not TSMAPI) or (arg == 'Aux' and not aux_frame) then
+			if (arg =='Atr' and not Atr_GetAuctionPrice and not Auctionator) or (arg =='TSM' and not TSM_API) or (arg == 'Aux' and not aux_frame) then
 				tremove(menu,i)
 			end
 		end
