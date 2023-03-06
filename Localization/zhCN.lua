@@ -118,3 +118,5 @@ L['Default'] = 'Default'
 L['Chat Frame'] = 'Chat Frame'
 L['Identify Chat Frames'] = 'Identify Chat Frames'
 
+L['Profiles'] = 'Profiles'
+L['Profile per Character'] = 'Profile per Character'

@@ -12,7 +12,8 @@ local L = LibStub('AceLocale-3.0'):GetLocale('KiwiFarm', true)
 
 -- game version
 local VERSION = select(4,GetBuildInfo())
-local CLASSIC = VERSION<40000
+local CLASSIC = VERSION<40000 or nil
+local RETAIL  = VERSION>=40000 or nil
 
 -- addon version
 local versionToc = GetAddOnMetadata(addonName, "Version")
@@ -83,6 +84,17 @@ local SOUNDS = CLASSIC and {
 	["Quest List Open"] = 567504,
 }
 
+local DEFROOT = { 
+	profilePerChar = {}, 
+}
+
+local DEFSERVER = {
+	leveling = {}, 	-- leveling info per character
+	resetData = CLASSIC and {}, -- reset data per character for classic
+	resets    = RETAIL and {count=0,countd=0}, -- reset data per server for retail
+	resetsd   = RETAIL and {}, -- reset data per server for retail
+}
+
 local DEFRESET = {
 	resets  = {count=0,countd=0}, -- resets per hour
 	resetsd = {}, -- resets per day  (max 30, only for classic)
@@ -104,18 +116,14 @@ local DEFDATA = {
 }
 
 -- database defaults
-local DEFAULT = {
+local DEFCONFIG = {
 	-- data/stats
 	session = {},
 	total   = {},
 	daily   = {},
 	zone    = {},
-	-- leveling info per character
-	leveling = {},
 	-- fields blacklists
 	collect = { total = {}, daily = {}, zone = {} },
-	-- instances locks&resets per character
-	resetData = {},
 	-- reset chat notification
 	resetsNotify = {},
 	-- prices
@@ -127,17 +135,15 @@ local DEFAULT = {
 	-- loot notification
 	notify = { [1]={chat=0}, [2]={chat=0}, [3]={chat=0}, [4]={chat=0}, [5]={chat=0}, sound={} },
 	-- appearance
-	visible     = true, -- main frame visibility
-	moneyFmt    = nil,
-	disabled    = { quality=true }, -- disabled text sections
-	backColor 	= { 0, 0, 0, .4 },
-	fontName    = nil,
-	fontsize    = nil,
-	framePos    = { anchor = 'TOPLEFT', x = 0, y = 0 },
+	visible   = true, -- main frame visibility
+	moneyFmt  = nil,
+	disabled  = { quality=true }, -- disabled text sections
+	backColor = { 0, 0, 0, .4 },
+	fontName  = nil,
+	fontsize  = nil,
+	framePos  = { anchor = 'TOPLEFT', x = 0, y = 0 },
 	-- minimap icon
 	minimapIcon = { hide = false },
-	-- debug
-	debug = {}
 }
 
 -- local references
@@ -171,14 +177,16 @@ local COPPER_PER_SILVER = COPPER_PER_SILVER
 local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
 
 -- database references
-local config   -- database realm table
+local root     -- root database table for all servers and chars
+local server   -- database realtm table
+local config   -- char-server data table
 local session  -- config.session
-local resets   -- config.resets     instance resets table
-local resetsd  -- config.resetsd
 local disabled -- config.disabled   texts table
 local notify   -- config.notify     notifications table
 local collect  -- config.collect
-local leveling -- config.leveling[charKey]  leveling info
+local leveling -- server.leveling[charKey]  leveling info
+local resets   -- server.resets  | server.resetData[charKey].resets   instance resets table
+local resetsd  -- server.resetsd | server.resetData[charKey].resetsd  instance resets table
 
 -- miscellaneous variables
 local inInstance
@@ -200,56 +208,53 @@ local timer   -- update timer
 -- ============================================================================
 
 local function InitDB(dst, src, reset, norecurse)
-	if type(dst)~="table" then
+	if type(dst)~='table' then
 		dst = {}
-	elseif reset then
-		wipe(dst)
+	elseif reset then 
+		wipe(dst) 
 	end
-	for k,v in pairs(src) do
-		if type(v)=="table" and not norecurse then
-			dst[k] = InitDB(dst[k] or {}, v)
-		elseif dst[k]==nil then
-			dst[k] = v
+	if src then
+		for k,v in pairs(src) do
+			if type(v)=="table" and not norecurse then
+				dst[k] = InitDB(dst[k] or {}, v)
+			elseif dst[k]==nil then
+				dst[k] = v
+			end
 		end
-	end
+	end	
 	return dst
 end
 
-local UpdateDB
-do
-	local function UpdateDB2(config)
-		if not config.__version then
-			for k,v in pairs(config.zone) do
-				v.moneyQuests = v.moneyQuests or 0
-			end
-			for k,v in pairs(config.daily) do
-				v.moneyQuests = v.moneyQuests or 0
-			end
-			config.__version = 1
-		end
-	end
-	UpdateDB = CLASSIC and function(config)
-		local data = config.resetData
-		local char = data[charKey] or DEFRESET
-		if config.resets then -- move resets per realm to resets per char (due to blizzard hotfix) but only in classic version
-			char.resets = config.resets or char.resets
-			config.resets  = nil
-		end
-		if config.resetsd then -- move resets per realm to resets per char (due to blizzard hotfix) but only in classic version
-			char.resetsd = config.resetsd or char.resetsd
-			config.resetsd = nil
-		end
-		char.resets.count  = char.resets.count  or 0
+local function InitKeyDB(db, key, src, reset, norecurse)
+	if db[key]==nil then db[key] = {}; end
+	return InitDB( db[key], src, reset, norecurse )
+end
+
+local function CreateDB()
+	local root   = InitKeyDB( _G, "KiwiFarmDB", DEFROOT)
+	local server = InitKeyDB( root, serverKey, DEFSERVER)
+	local config = InitKeyDB( root, root.profilePerChar[charKey] and charKey or serverKey, DEFCONFIG, false, true)
+	InitDB(config.session, DEFDATA)
+	InitDB(config.total, DEFDATA)
+	if CLASSIC then -- move resets per realm to resets per char (due to blizzard hotfix) but only in classic version
+		local char = InitKeyDB( server.resetData, charKey, DEFRESET )
+		char.resetsd = server.resetsd or char.resetsd 
+		char.resets = server.resets or char.resets 
+		char.resets.count = char.resets.count or 0
 		char.resets.countd = char.resets.countd or 0
-		data[charKey] = char
-		UpdateDB2(config)
-	end or function(config)
-		config.resets  = config.resets  or {}
-		config.resetsd = config.resetsd or {}
-		config.resets.count  = config.resets.count  or 0
-		config.resets.countd = config.resets.countd or 0
-		UpdateDB2(config)
+		server.resets  = nil
+		server.resetsd = nil
 	end
+	if not config.__version then
+		for k,v in pairs(config.zone) do
+			v.moneyQuests = v.moneyQuests or 0
+		end
+		for k,v in pairs(config.daily) do
+			v.moneyQuests = v.moneyQuests or 0
+		end
+		config.__version = 1
+	end
+	return  root, server, config
 end
 
 local function AddDB(dst, src, blacklist)
@@ -669,7 +674,7 @@ do
 					if not UnitExists(unit) then break end
 					local nameKey = UnitName(unit) .. " - " .. serverKey
 					if charKey~=nameKey then
-						local resetChar = config.resetData[nameKey]
+						local resetChar = server.resetData[nameKey]
 						if resetChar then
 							LockAddCharReset(zone, ctime, resetChar.resets, resetChar.resetsd, true)
 						end
@@ -989,7 +994,7 @@ end
 -- leveling init
 local function LevelingInit()
 	if isPlayerLeveling then -- player not max level ?
-		leveling = config.leveling[charKey] or {}
+		leveling = server.leveling[charKey] or {}
 		if not leveling.startTime then
 			if leveling.xpLastXP~=UnitXP('player') or leveling.xpMaxXP~=UnitXPMax('player') then
 				LevelingReset()
@@ -998,7 +1003,7 @@ local function LevelingInit()
 			end
 		end
 	end
-	config.leveling[charKey] = leveling -- assigning nil if player is at max level
+	server.leveling[charKey] = leveling -- assigning nil if player is at max level
 end
 
 -- restore main frame position
@@ -1314,21 +1319,13 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	timer:SetLooping("REPEAT")
 	timer:SetScript("OnLoop", RefreshText)
 	-- database setup
-	local root = KiwiFarmDB
-	if not root then root = {}; KiwiFarmDB = root; end
-	config = root[serverKey]
-	if not config then config = {}; root[serverKey] = config; end
-	addon.config = config
-	InitDB(config, DEFAULT, false, true)
-	InitDB(config.session, DEFDATA)
-	InitDB(config.total, DEFDATA)
-	UpdateDB(config)
+	root, server, config = CreateDB()
 	session  = config.session
 	notify   = config.notify
 	disabled = config.disabled
 	collect  = config.collect
-	resets   = config.resets  or config.resetData[charKey].resets
-	resetsd  = config.resetsd or config.resetData[charKey].resetsd
+	resets   = server.resets  or server.resetData[charKey].resets
+	resetsd  = server.resetsd or server.resetData[charKey].resetsd
 	-- remove old data from database
 	local key = date("%Y/%m/%d", time()-86400*7)
 	for k,v in next, config.daily do
@@ -2209,30 +2206,6 @@ do
 			{ text = L['All Items looted'], value = 'price', notCheckable = true, hasArrow = true, menuList = menuNotify },
 			{ text = L['Money looted'], value = 'money', notCheckable = true, hasArrow = true, menuList = menuNotify },
 		} },
-		{ text = L['Miscellaneous'], notCheckable= true, hasArrow = true, menuList = {
-			{ text = L['Chat Text Frame'], notCheckable = true, hasArrow = true, menuList = {
-				{ text = L['Default'],         value =  0, checked = ChatFrameChecked, func = SetChatFrame },
-				{ text = L['Chat Frame'] .. ' 1',  value =  1, checked = ChatFrameChecked, func = SetChatFrame },
-				{ text = L['Chat Frame'] .. ' 2',  value =  2, checked = ChatFrameChecked, func = SetChatFrame },
-				{ text = L['Chat Frame'] .. ' 3',  value =  3, checked = ChatFrameChecked, func = SetChatFrame },
-				{ text = L['Chat Frame'] .. ' 4',  value =  4, checked = ChatFrameChecked, func = SetChatFrame },
-				{ text = L['Chat Frame'] .. ' 5',  value =  5, checked = ChatFrameChecked, func = SetChatFrame },
-				{ text = L['Chat Frame'] .. ' 6',  value =  6, checked = ChatFrameChecked, func = SetChatFrame },
-				{ text = L['Chat Frame'] .. ' 7',  value =  7, checked = ChatFrameChecked, func = SetChatFrame },
-				{ text = L['Chat Frame'] .. ' 8',  value =  8, checked = ChatFrameChecked, func = SetChatFrame },
-				{ text = L['Chat Frame'] .. ' 9',  value =  9, checked = ChatFrameChecked, func = SetChatFrame },
-				{ text = L['Chat Frame'] .. ' 10', value = 10, checked = ChatFrameChecked, func = SetChatFrame },
-				{ text = L['Identify Chat Frames'], notCheckable = true, func = ChatFrameIdentify },
-			} },
-			{ text = L['Money Format'], notCheckable = true, hasArrow = true, menuList = {
-				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r 99|cffeda55fc|r', value = '', 							    checked = MoneyFmtChecked, func = SetMoneyFmt },
-				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 				 value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
-				{ text = '999|cffffd70ag|r', 								 value = '%d|cffffd70ag|r', 				checked = MoneyFmtChecked, func = SetMoneyFmt },
-			} },
-			{ text = L['Data Collection'], notCheckable= true, hasArrow = true, menuList = menuCollect },
-			{ text = L['Farming Zones'],   notCheckable= true, hasArrow = true, menuList = menuZones },
-			{ text = L['Reset Notification'],   notCheckable= true, hasArrow = true, menuList = menuResetNotify },
-		} },
 		{ text = L['Appearance'], notCheckable= true, hasArrow = true, menuList = {
 			{ text = L['Frame Anchor'], notCheckable= true, hasArrow = true, menuList = {
 				{ text = L['Top Left'],     value = 'TOPLEFT',     checked = AnchorChecked, func = SetAnchor },
@@ -2261,6 +2234,37 @@ do
 				set = function(info, ...) config.backColor = {...}; SetBackground(); end,
 			},
 		} },
+		{ text = L['Miscellaneous'], notCheckable= true, hasArrow = true, menuList = {
+			{ text = L['Chat Text Frame'], notCheckable = true, hasArrow = true, menuList = {
+				{ text = L['Default'],         value =  0, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 1',  value =  1, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 2',  value =  2, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 3',  value =  3, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 4',  value =  4, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 5',  value =  5, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 6',  value =  6, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 7',  value =  7, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 8',  value =  8, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 9',  value =  9, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Chat Frame'] .. ' 10', value = 10, checked = ChatFrameChecked, func = SetChatFrame },
+				{ text = L['Identify Chat Frames'], notCheckable = true, func = ChatFrameIdentify },
+			} },
+			{ text = L['Money Format'], notCheckable = true, hasArrow = true, menuList = {
+				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r 99|cffeda55fc|r', value = '', 							    checked = MoneyFmtChecked, func = SetMoneyFmt },
+				{ text = '999|cffffd70ag|r 99|cffc7c7cfs|r', 				 value = '%d|cffffd70ag|r %d|cffc7c7cfs|r', checked = MoneyFmtChecked, func = SetMoneyFmt },
+				{ text = '999|cffffd70ag|r', 								 value = '%d|cffffd70ag|r', 				checked = MoneyFmtChecked, func = SetMoneyFmt },
+			} },
+			{ text = L['Data Collection'], notCheckable= true, hasArrow = true, menuList = menuCollect },
+			{ text = L['Farming Zones'],   notCheckable= true, hasArrow = true, menuList = menuZones },
+			{ text = L['Reset Notification'],   notCheckable= true, hasArrow = true, menuList = menuResetNotify },
+		} },
+		{ text = L['Profiles'], notCheckable = true, hasArrow = true, menuList = {
+			{ text = L['Profile per Character'], isNotRadio = true, keepShownOnClick = 1, checked = function() return root.profilePerChar[charKey] end,
+					func = function() addon:ConfirmDialog( L["UI must be reloaded. Are you Sure?"], function() 
+							root.profilePerChar[charKey] = not root.profilePerChar[charKey] or nil; ReloadUI(); 
+					end) end,
+			},
+		} },	
 		{ text = L['Hide Window'], notCheckable = true, hidden = function() return not openedFromMain end, func = function() UpdateFrameVisibility(false); end },
 	}
 	function addon:ShowMenu(fromMain)

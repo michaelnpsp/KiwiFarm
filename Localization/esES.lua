@@ -116,3 +116,6 @@ L['Chat Text Frame'] = 'Ventana de Chat'
 L['Default'] = 'Por defecto'
 L['Chat Frame'] = 'Ventana de Chat'
 L['Identify Chat Frames'] = 'Identificar Ventanas de Chat'
+
+L['Profiles'] = 'Perfiles'
+L['Profile per Character'] = 'Perfil por Personaje'
