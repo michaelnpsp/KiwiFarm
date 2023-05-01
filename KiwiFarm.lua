@@ -1339,7 +1339,13 @@ addon:SetScript("OnEvent", function(frame, event, name)
 			text = "KiwiFarm",
 			icon  = "Interface\\AddOns\\KiwiFarm\\KiwiFarm.tga",
 			registerForAnyClick = true,
-			func = function() addon:ShowMenu() end,
+			func = function(_,_,_,_,button) 
+				if button == 'RightButton' then
+					addon:ShowMenu()
+				else
+					UpdateFrameVisibility()
+				end
+			end,
 		})
 	end
 	-- minimap icon
