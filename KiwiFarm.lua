@@ -1333,6 +1333,15 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	end
 	-- init leveling session
 	LevelingInit()
+	-- compartment icon
+	if AddonCompartmentFrame and AddonCompartmentFrame.RegisterAddon then 
+		AddonCompartmentFrame:RegisterAddon({
+			text = "KiwiFarm",
+			icon  = "Interface\\AddOns\\KiwiFarm\\KiwiFarm.tga",
+			registerForAnyClick = true,
+			func = function() addon:ShowMenu() end,
+		})
+	end
 	-- minimap icon
 	LibStub("LibDBIcon-1.0"):Register(addonName, LibStub("LibDataBroker-1.1"):NewDataObject(addonName, {
 		type  = "launcher",
