@@ -7,6 +7,7 @@
 ## Notes: Reset & Gold Tracker
 ## Author: MiCHaeL
 ## Version: @project-version@
+## IconTexture: Interface/AddOns/KiwiFarm/KiwiFarm.tga
 ## X-Curse-Project-ID: 350500
 ## X-Wago-ID: 0mNw9BKo
 ## SavedVariables: KiwiFarmDB
