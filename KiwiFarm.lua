@@ -1339,6 +1339,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 			text = "KiwiFarm",
 			icon  = "Interface\\AddOns\\KiwiFarm\\KiwiFarm.tga",
 			registerForAnyClick = true,
+			notCheckable = true,
 			func = function(_,_,_,_,button) 
 				if button == 'RightButton' then
 					addon:ShowMenu()
