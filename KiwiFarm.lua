@@ -16,6 +16,7 @@ local CLASSIC = VERSION<40000 or nil
 local RETAIL  = VERSION>=40000 or nil
 
 -- addon version
+local GetAddOnMetadata = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
 local versionToc = GetAddOnMetadata(addonName, "Version")
 local versionStr = (versionToc=='\@project-version\@' and 'Dev' or versionToc)
 
