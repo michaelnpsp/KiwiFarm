@@ -949,16 +949,6 @@ local function SessionStop()
 	return curTime
 end
 
-
--- toggle session
-local function SessionToggle()
-	if session.startTime then
-		SessionStop()
-	else
-		SessionStart()
-	end
-end
-
 -- session finish
 local function SessionFinish()
 	if session.startTime or session.duration then
@@ -975,6 +965,24 @@ local function SessionFinish()
 		session.duration = nil
 		timeLootedItems = curTime
 		RefreshText()
+	end
+end
+
+-- toggle start/stop session
+local function SessionTogglePause()
+	if session.startTime then
+		SessionStop()
+	else
+		SessionStart()
+	end
+end
+
+-- toggle start/finish session
+local function SessionToggleFinish()
+	if session.startTime then
+		SessionFinish()
+	else
+		SessionStart()
 	end
 end
 
@@ -1430,7 +1438,9 @@ SlashCmdList.KIWIFARM = function(args)
 	elseif arg1 == 'finish' then
 		SessionFinish()
 	elseif arg1 =='startstop' then
-		SessionToggle()
+		SessionTogglePause()
+	elseif arg1 =='startfinish' then
+		SessionToggleFinish()
 	elseif arg1 == 'config' then
 		addon:ShowMenu()
 	elseif arg1 == 'resetpos' then
@@ -1449,16 +1459,17 @@ SlashCmdList.KIWIFARM = function(args)
 		print("  Shift-Click to reset instances.")
 		print("  Click&Drag to move main frame.")
 		print("Commands:")
-		print("  /kfarm show       -- show main window")
-		print("  /kfarm hide       -- hide main window")
-		print("  /kfarm toggle     -- show/hide main window")
-		print("  /kfarm start      -- session start")
-		print("  /kfarm stop       -- session stop")
-		print("  /kfarm finish     -- session finish")
-		print("  /kfarm startstop  -- session start/stop toggle")		
- 		print("  /kfarm config     -- display config menu")
-		print("  /kfarm minimap    -- toggle minimap icon visibility")
-		print("  /kfarm resetpos   -- reset main window position")
+		print("  /kfarm show        -- show main window")
+		print("  /kfarm hide        -- hide main window")
+		print("  /kfarm toggle      -- show/hide main window")
+		print("  /kfarm start       -- session start")
+		print("  /kfarm stop        -- session stop")
+		print("  /kfarm finish      -- session finish")
+		print("  /kfarm startstop   -- session start/stop toggle")
+		print("  /kfarm startfinish -- session start/finish toggle")				
+ 		print("  /kfarm config      -- display config menu")
+		print("  /kfarm minimap     -- toggle minimap icon visibility")
+		print("  /kfarm resetpos    -- reset main window position")
 	end
 end
 
@@ -2189,7 +2200,7 @@ do
 	-- menu: main
 	local menuMain = {
 		{ text = L['Kiwi Farm [/kfarm]'], notCheckable = true, isTitle = true },
-		{ text = getSessionText,       notCheckable = true, func = SessionToggle },
+		{ text = getSessionText,       notCheckable = true, func = SessionTogglePause },
 		{ text = L['Session Finish'],     notCheckable = true, disabled = function() return not (session.startTime or session.duration) end, func = setSessionFinish },
 		{ text = L['Reset Instances'],    notCheckable = true, func = ResetInstances },
 		{ text = L['Reset XP Info'],      notCheckable = true, func = LevelingReset },
