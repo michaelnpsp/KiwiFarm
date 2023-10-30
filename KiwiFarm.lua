@@ -949,6 +949,16 @@ local function SessionStop()
 	return curTime
 end
 
+
+-- toggle session
+local function SessionToggle()
+	if session.startTime then
+		SessionStop()
+	else
+		SessionStart()
+	end
+end
+
 -- session finish
 local function SessionFinish()
 	if session.startTime or session.duration then
@@ -1419,6 +1429,8 @@ SlashCmdList.KIWIFARM = function(args)
 		SessionStop()
 	elseif arg1 == 'finish' then
 		SessionFinish()
+	elseif arg1 =='startstop' then
+		SessionToggle()
 	elseif arg1 == 'config' then
 		addon:ShowMenu()
 	elseif arg1 == 'resetpos' then
@@ -1437,15 +1449,16 @@ SlashCmdList.KIWIFARM = function(args)
 		print("  Shift-Click to reset instances.")
 		print("  Click&Drag to move main frame.")
 		print("Commands:")
-		print("  /kfarm show     -- show main window")
-		print("  /kfarm hide     -- hide main window")
-		print("  /kfarm toggle   -- show/hide main window")
-		print("  /kfarm start    -- session start")
-		print("  /kfarm stop     -- session stop")
-		print("  /kfarm finish   -- session finish")
- 		print("  /kfarm config   -- display config menu")
-		print("  /kfarm minimap  -- toggle minimap icon visibility")
-		print("  /kfarm resetpos -- reset main window position")
+		print("  /kfarm show       -- show main window")
+		print("  /kfarm hide       -- hide main window")
+		print("  /kfarm toggle     -- show/hide main window")
+		print("  /kfarm start      -- session start")
+		print("  /kfarm stop       -- session stop")
+		print("  /kfarm finish     -- session finish")
+		print("  /kfarm startstop  -- session start/stop toggle")		
+ 		print("  /kfarm config     -- display config menu")
+		print("  /kfarm minimap    -- toggle minimap icon visibility")
+		print("  /kfarm resetpos   -- reset main window position")
 	end
 end
 
@@ -1658,14 +1671,9 @@ do
 	local function getSessionText()
 		return (session.startTime and L['Session Pause']) or (session.duration and L['Session Continue']) or L['Session Start']
 	end
-	local function setSession()
-		if session.startTime then
-			SessionStop()
-		else
-			SessionStart()
-		end
+	local function setSessionFinish()
+		addon:ConfirmDialog( L["Are you sure you want to finish current farm session ?"], SessionFinish )
 	end
-
 	-- submenu: farmZones
 	local menuZones
 	do
@@ -2181,8 +2189,8 @@ do
 	-- menu: main
 	local menuMain = {
 		{ text = L['Kiwi Farm [/kfarm]'], notCheckable = true, isTitle = true },
-		{ text = getSessionText,       notCheckable = true, func = setSession },
-		{ text = L['Session Finish'],     notCheckable = true, disabled = function() return not (session.startTime or session.duration) end, func = SessionFinish },
+		{ text = getSessionText,       notCheckable = true, func = SessionToggle },
+		{ text = L['Session Finish'],     notCheckable = true, disabled = function() return not (session.startTime or session.duration) end, func = setSessionFinish },
 		{ text = L['Reset Instances'],    notCheckable = true, func = ResetInstances },
 		{ text = L['Reset XP Info'],      notCheckable = true, func = LevelingReset },
 		{ text = L['Statistics'],         notCheckable = true, isTitle = true },
