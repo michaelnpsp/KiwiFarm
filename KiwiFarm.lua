@@ -85,8 +85,8 @@ local SOUNDS = CLASSIC and {
 	["Quest List Open"] = 567504,
 }
 
-local DEFROOT = { 
-	profilePerChar = {}, 
+local DEFROOT = {
+	profilePerChar = {},
 }
 
 local DEFSERVER = {
@@ -211,8 +211,8 @@ local timer   -- update timer
 local function InitDB(dst, src, reset, norecurse)
 	if type(dst)~='table' then
 		dst = {}
-	elseif reset then 
-		wipe(dst) 
+	elseif reset then
+		wipe(dst)
 	end
 	if src then
 		for k,v in pairs(src) do
@@ -222,7 +222,7 @@ local function InitDB(dst, src, reset, norecurse)
 				dst[k] = v
 			end
 		end
-	end	
+	end
 	return dst
 end
 
@@ -239,8 +239,8 @@ local function CreateDB()
 	InitDB(config.total, DEFDATA)
 	if CLASSIC then -- move resets per realm to resets per char (due to blizzard hotfix) but only in classic version
 		local char = InitKeyDB( server.resetData, charKey, DEFRESET )
-		char.resetsd = server.resetsd or char.resetsd 
-		char.resets = server.resets or char.resets 
+		char.resetsd = server.resetsd or char.resetsd
+		char.resets = server.resets or char.resets
 		char.resets.count = char.resets.count or 0
 		char.resets.countd = char.resets.countd or 0
 		server.resets  = nil
@@ -1241,7 +1241,10 @@ do
 					LockDel(1)
 				end
 				curZoneName = zone
-				if config.farmZones then
+				if config.farmWorld then
+					SessionStart()
+					self:Show()
+				elseif config.farmZones then
 					if config.farmZones[zone] then
 						if inInstance and (lastZoneKey or time()-(session.endTime or 0)<300) then -- continue session if logout was less than 5 minutes
 							SessionStart()
@@ -1353,13 +1356,13 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	-- init leveling session
 	LevelingInit()
 	-- compartment icon
-	if AddonCompartmentFrame and AddonCompartmentFrame.RegisterAddon then 
+	if AddonCompartmentFrame and AddonCompartmentFrame.RegisterAddon then
 		AddonCompartmentFrame:RegisterAddon({
 			text = "KiwiFarm",
 			icon  = "Interface\\AddOns\\KiwiFarm\\KiwiFarm.tga",
 			registerForAnyClick = true,
 			notCheckable = true,
-			func = function(_,_,_,_,button) 
+			func = function(_,_,_,_,button)
 				if button == 'RightButton' then
 					addon:ShowMenu()
 				else
@@ -1466,7 +1469,7 @@ SlashCmdList.KIWIFARM = function(args)
 		print("  /kfarm stop        -- session stop")
 		print("  /kfarm finish      -- session finish")
 		print("  /kfarm startstop   -- session start/stop toggle")
-		print("  /kfarm startfinish -- session start/finish toggle")				
+		print("  /kfarm startfinish -- session start/finish toggle")
  		print("  /kfarm config      -- display config menu")
 		print("  /kfarm minimap     -- toggle minimap icon visibility")
 		print("  /kfarm resetpos    -- reset main window position")
@@ -1701,12 +1704,20 @@ do
 			addon:ZONE_CHANGED_NEW_AREA()
 			wipeMenu(menuZones)
 		end
+		local function GetFarmWorld()
+			return config.farmWorld
+		end
+		local function SetFarmWorld()
+			config.farmWorld = (not config.farmWorld) or nil
+			addon:ZONE_CHANGED_NEW_AREA()
+		end
 		menuZones = { init = function(menu)
 			if not menu[1] then
 				for zone in pairs(config.farmZones or {}) do
 					menu[#menu+1] = { text = '(-)'..zone, value = zone, notCheckable = true, func = ZoneDel }
 				end
 				menu[#menu+1] = { text = L['(+)Add Current Zone'], notCheckable = true, func = ZoneAdd }
+				menu[#menu+1] = { text = L['World Farm Mode'],  isNotRadio = true, keepShownOnClick = 1, checked = GetFarmWorld, func = SetFarmWorld }
 			end
 		end	}
 	end
@@ -2211,6 +2222,7 @@ do
 		{ text = L['Totals'],             notCheckable = true, hasArrow = true, value = 'total',   menuList = menuStats },
 		{ text = L['Resets'],             notCheckable = true, hasArrow = true, menuList = menuResets },
 		{ text = L['Settings'],           notCheckable = true, isTitle = true },
+		{ text = L['Farming Zones'],      notCheckable = true, hasArrow = true, menuList = menuZones },
 		{ text = L['Display Info'], notCheckable= true, hasArrow = true, menuList = {
 			{ text = L['Lock&Resets'],      value = 'reset',      isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 			{ text = L['Mobs&Items Count'], value = 'count',      isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
@@ -2291,16 +2303,15 @@ do
 				{ text = '999|cffffd70ag|r', 								 value = '%d|cffffd70ag|r', 				checked = MoneyFmtChecked, func = SetMoneyFmt },
 			} },
 			{ text = L['Data Collection'], notCheckable= true, hasArrow = true, menuList = menuCollect },
-			{ text = L['Farming Zones'],   notCheckable= true, hasArrow = true, menuList = menuZones },
 			{ text = L['Reset Notification'],   notCheckable= true, hasArrow = true, menuList = menuResetNotify },
 		} },
 		{ text = L['Profiles'], notCheckable = true, hasArrow = true, menuList = {
 			{ text = L['Profile per Character'], isNotRadio = true, keepShownOnClick = 1, checked = function() return root.profilePerChar[charKey] end,
-					func = function() addon:ConfirmDialog( L["UI must be reloaded. Are you Sure?"], function() 
-							root.profilePerChar[charKey] = not root.profilePerChar[charKey] or nil; ReloadUI(); 
+					func = function() addon:ConfirmDialog( L["UI must be reloaded. Are you Sure?"], function()
+							root.profilePerChar[charKey] = not root.profilePerChar[charKey] or nil; ReloadUI();
 					end) end,
 			},
-		} },	
+		} },
 		{ text = L['Hide Window'], notCheckable = true, hidden = function() return not openedFromMain end, func = function() UpdateFrameVisibility(false); end },
 	}
 	function addon:ShowMenu(fromMain)
