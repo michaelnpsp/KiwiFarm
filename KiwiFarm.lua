@@ -20,6 +20,9 @@ local GetAddOnMetadata = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetad
 local versionToc = GetAddOnMetadata(addonName, "Version")
 local versionStr = (versionToc=='\@project-version\@' and 'Dev' or versionToc)
 
+-- player GUID
+local playerGUID = UnitGUID("player")
+
 -- database keys
 local serverKey = GetRealmName()
 local charKey   = UnitName("player") .. " - " .. serverKey
@@ -190,7 +193,6 @@ local UnitXP = UnitXP
 local UnitXPMax = UnitXPMax
 local COPPER_PER_GOLD = COPPER_PER_GOLD
 local COPPER_PER_SILVER = COPPER_PER_SILVER
-local COMBATLOG_OBJECT_CONTROL_NPC = COMBATLOG_OBJECT_CONTROL_NPC
 
 -- database references
 local root     -- root database table for all servers and chars
@@ -212,6 +214,7 @@ local combatCurKills = 0
 local combatPreKills = 0
 local timeLootedItems = 0 -- track changes in config.lootedItems table
 local combatStartXP = 0
+local enemyGUIDS = {}
 
 -- main frame elements
 local textl   -- left text
@@ -1261,6 +1264,7 @@ function addon:PLAYER_REGEN_ENABLED()
 			leveling.xpLastPull = pullXP
 		end
 	end
+	wipe(enemyGUIDS)
 end
 
 -- zones management
@@ -1318,18 +1322,35 @@ end
 
 -- If we kill a npc inside instance a ResetInstance() is executed on player logout, so we need this to track
 -- and save this hidden reset, see addon:PLAYER_LOGOUT()
-function addon:COMBAT_LOG_EVENT_UNFILTERED()
-	local _, eventType,_,srcGUID,srcName,_,_,dstGUID,dstName,dstFlags = CombatLogGetCurrentEventInfo()
-	if eventType == 'UNIT_DIED' and band(dstFlags,COMBATLOG_OBJECT_TYPE_NPC)~=0 then
-		if inInstance and not resets[curZoneName] and IsDungeon() then
-			LockAddInstance(curZoneName) -- register used instance
-			timer:Play()
-		end
-		if session.startTime then
-			session.countMobs = session.countMobs + 1
-			session.killedMobs[dstName] = (session.killedMobs[dstName] or 0) + 1
-			combatCurKills = (combatCurKills or 0) + 1
-			if not session.zoneName then session.zoneName = curZoneName end
+-- addon:COMBAT_LOG_EVENT_UNFILTERED()
+do
+	local COMBATLOG_OBJECT_TYPE_NPC = COMBATLOG_OBJECT_TYPE_NPC
+	local Events = {
+		UNIT_DIED = true,
+		SPELL_DAMAGE = true,
+		SWING_DAMAGE = true,
+		RANGE_DAMAGE = true,
+		SPELL_PERIODIC_DAMAGE = true,
+		SPELL_BUILDING_DAMAGE = true,
+	}
+	function addon:COMBAT_LOG_EVENT_UNFILTERED()
+		local _, eventType,_,srcGUID,srcName,_,_,dstGUID,dstName,dstFlags = CombatLogGetCurrentEventInfo()
+		if Events[eventType] then
+			if eventType == 'UNIT_DIED' then
+				if inInstance and not resets[curZoneName] and IsDungeon() then
+					LockAddInstance(curZoneName) -- register used instance
+					timer:Play()
+				end
+				if session.startTime and (inInstance or enemyGUIDS[dstGUID])  then
+					enemyGUIDS[dstGUID] = nil
+					session.countMobs = session.countMobs + 1
+					session.killedMobs[dstName] = (session.killedMobs[dstName] or 0) + 1
+					combatCurKills = (combatCurKills or 0) + 1
+					if not session.zoneName then session.zoneName = curZoneName end
+				end
+			elseif srcGUID==playerGUID and enemyGUIDS[dstGUID]==nil and band(dstFlags,COMBATLOG_OBJECT_TYPE_NPC) then
+				enemyGUIDS[dstGUID] = true
+			end
 		end
 	end
 end
