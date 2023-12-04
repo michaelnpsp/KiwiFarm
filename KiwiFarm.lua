@@ -5,7 +5,7 @@
 local addonName = ...
 
 -- main frame
-local addon = CreateFrame('Frame', "KiwiFarm", UIParent)
+local addon = CreateFrame('Frame', "KiwiFarm", UIParent, BackdropTemplateMixin and "BackdropTemplate")
 
 -- locale
 local L = LibStub('AceLocale-3.0'):GetLocale('KiwiFarm', true)
@@ -42,7 +42,7 @@ local isPlayerLeveling = UnitLevel('player') < (MAX_PLAYER_LEVEL_TABLE[GetExpans
 -- default values
 local RESET_MAX = CLASSIC and 5 or 10
 local RESET_DAY = 30
-local MARGIN = 4
+local COLOR_WHITE = { 1,1,1,1 }
 local COLOR_TRANSPARENT = { 0,0,0,0 }
 local FONTS = (GetLocale() == 'zhCN') and {
 	Arial = 'Fonts\\ARHei.TTF',
@@ -83,6 +83,15 @@ local SOUNDS = CLASSIC and {
 	["Raid Warning"] =567397,
 	["Ready Check"] = 567478,
 	["Quest List Open"] = 567504,
+}
+local BORDERS = {
+	["None"] = [[]],
+	["Blizzard Tooltip"] = [[Interface\Tooltips\UI-Tooltip-Border]],
+	["Blizzard Party"] = [[Interface\CHARACTERFRAME\UI-Party-Border]],
+	["Blizzard Dialog"] = [[Interface\DialogFrame\UI-DialogBox-Border]],
+	["Blizzard Dialog Gold"] = [[Interface\DialogFrame\UI-DialogBox-Gold-Border]],
+	["Blizzard Chat Bubble"] = [[Interface\Tooltips\ChatBubble-Backdrop]],
+	["Blizzard Achievement Wood"] = [[Interface\AchievementFrame\UI-Achievement-WoodBorder]],
 }
 
 local DEFROOT = {
@@ -131,17 +140,23 @@ local DEFCONFIG = {
 	priceByItem = {},
 	priceByQuality = { [0]={vendor=true}, [1]={vendor=true}, [2]={vendor=true}, [3]={vendor=true}, [4]={vendor=true}, [5]={vendor=true} },
 	ignoreEnchantingMats = nil,
-	-- farming zones
-	zones = nil,
 	-- loot notification
 	notify = { [1]={chat=0}, [2]={chat=0}, [3]={chat=0}, [4]={chat=0}, [5]={chat=0}, sound={} },
+	-- session control, farming zones
+	farmZones = nil,
+	farmDisableZones = nil,
+	farmAutoStart = nil,
+	farmAutoFinish = nil,
 	-- appearance
 	visible   = true, -- main frame visibility
 	moneyFmt  = nil,
 	disabled  = { quality=true }, -- disabled text sections
 	backColor = { 0, 0, 0, .4 },
+	borderColor = { 1, 1, 1, 1 },
+	borderTexture = nil,
 	fontName  = nil,
 	fontsize  = nil,
+	frameMargin = 4,
 	framePos  = { anchor = 'TOPLEFT', x = 0, y = 0 },
 	-- minimap icon
 	minimapIcon = { hide = false },
@@ -199,7 +214,6 @@ local timeLootedItems = 0 -- track changes in config.lootedItems table
 local combatStartXP = 0
 
 -- main frame elements
-local texture -- background texture
 local textl   -- left text
 local textr   -- right text
 local timer   -- update timer
@@ -259,27 +273,31 @@ local function CreateDB()
 end
 
 local function AddDB(dst, src, blacklist)
-	for k,v in pairs(src) do
-		if not (blacklist and blacklist[k]) then
-			local typ = type(v)
-			if typ=="table" then
-				dst[k] = AddDB(dst[k] or {}, v)
-			elseif typ=='number' then
-				dst[k] = (dst[k] or 0) + v
+	if dst then
+		for k,v in pairs(src) do
+			if not (blacklist and blacklist[k]) then
+				local typ = type(v)
+				if typ=="table" then
+					dst[k] = AddDB(dst[k] or {}, v)
+				elseif typ=='number' then
+					dst[k] = (dst[k] or 0) + v
+				end
 			end
 		end
+		return dst
 	end
-	return dst
 end
 
 local function GetZoneDB(key)
 	key = key or curZoneName
-	local data = config.zone[key]
-	if not data then
-		data = InitDB({ _type = 'zone', _key = key }, DEFDATA)
-		config.zone[key] = data
+	if key and key~='' then
+		local data = config.zone[key]
+		if not data then
+			data = InitDB({ _type = 'zone', _key = key }, DEFDATA)
+			config.zone[key] = data
+		end
+		return data
 	end
-	return data
 end
 
 local function GetDailyDB(datetime)
@@ -928,6 +946,7 @@ end
 local function SessionStart(refresh)
 	if not session.startTime or refresh then
 		session.startTime = session.startTime or time()
+		session.endTime = nil
 		addon:RegisterEvent("CHAT_MSG_LOOT")
 		addon:RegisterEvent("CHAT_MSG_MONEY")
 		addon:RegisterEvent("QUEST_TURNED_IN")
@@ -937,23 +956,24 @@ end
 
 -- session stop
 local function SessionStop()
-	local curTime = time()
 	if session.startTime then
+		local curTime = time()
 		session.duration = (session.duration or 0) + (curTime - (session.startTime or curTime))
 		session.startTime = nil
 		session.endTime = curTime
 		addon:UnregisterEvent("CHAT_MSG_LOOT")
 		addon:UnregisterEvent("CHAT_MSG_MONEY")
 		addon:UnregisterEvent("QUEST_TURNED_IN")
+		return curTime
 	end
-	return curTime
+	return session.endTime or time()
 end
 
 -- session finish
 local function SessionFinish()
 	if session.startTime or session.duration then
 		local curTime     = SessionStop()
-		local zoneName    = session.zoneName or curZoneName
+		local zoneName    = session.zoneName
 		session.endTime   = nil
 		session.zoneName  = nil
 		if session.moneyCash>0 or session.moneyItems>0 or session.moneyQuests>0 or session.countItems>0 or session.countMobs>0 then
@@ -1047,8 +1067,8 @@ end
 
 -- frame sizing
 local function UpdateFrameSize()
-	addon:SetHeight( textl:GetHeight() + MARGIN*2 )
-	addon:SetWidth( config.frameWidth or (textl:GetWidth() * 2.3) + MARGIN*2 )
+	addon:SetHeight( textl:GetHeight() + config.frameMargin*2 )
+	addon:SetWidth( config.frameWidth or (textl:GetWidth() * 2.3) + config.frameMargin*2 )
 	addon:SetScript('OnUpdate', UpdateFrameAlpha)
 end
 
@@ -1061,22 +1081,37 @@ local function UpdateFrameVisibility(visible)
 	config.visible = visible
 end
 
+local function SetBackground()
+	if config.borderTexture then
+		addon:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8X8",
+			edgeFile = config.borderTexture,
+			tile = true, tileSize = 8, edgeSize = 16,
+			insets = { left = 4, right = 4, top = 4, bottom = 4 },
+		})
+		addon:SetBackdropBorderColor( unpack(config.borderColor or COLOR_WHITE) )
+	else
+		addon:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
+	end
+	addon:SetBackdropColor( unpack(config.backColor or COLOR_TRANSPARENT) )
+end
+
 -- layout main frame
 local function LayoutFrame()
 	addon:SetAlpha(0)
 	-- background
-	texture:SetColorTexture( unpack(config.backColor or COLOR_TRANSPARENT) )
+	SetBackground()
 	-- text left
 	textl:ClearAllPoints()
-	textl:SetPoint('TOPLEFT', MARGIN, -MARGIN)
+	textl:SetPoint('TOPLEFT', config.frameMargin, -config.frameMargin)
 	textl:SetJustifyH('LEFT')
 	textl:SetJustifyV('TOP')
 	SetTextFont(textl, config.fontName, config.fontSize, 'OUTLINE')
 	PrepareText()
 	-- text right
 	textr:ClearAllPoints()
-	textr:SetPoint('TOPRIGHT', -MARGIN, -MARGIN)
-	textr:SetPoint('TOPLEFT', MARGIN, -MARGIN)
+	textr:SetPoint('TOPRIGHT', -config.frameMargin, -config.frameMargin)
+	textr:SetPoint('TOPLEFT', config.frameMargin, -config.frameMargin)
 	textr:SetJustifyH('RIGHT')
 	textr:SetJustifyV('TOP')
 	SetTextFont(textr, config.fontName, config.fontSize, 'OUTLINE')
@@ -1241,12 +1276,9 @@ do
 					LockDel(1)
 				end
 				curZoneName = zone
-				if config.farmWorld then
-					SessionStart()
-					self:Show()
-				elseif config.farmZones then
+				if config.farmZones and not config.farmDisableZones then
 					if config.farmZones[zone] then
-						if inInstance and (lastZoneKey or time()-(session.endTime or 0)<300) then -- continue session if logout was less than 5 minutes
+						if lastZoneKey or time()-(session.endTime or 0)<300 then -- continue session if logout->login < 5 minutes
 							SessionStart()
 						end
 						self:Show()
@@ -1287,8 +1319,8 @@ end
 -- If we kill a npc inside instance a ResetInstance() is executed on player logout, so we need this to track
 -- and save this hidden reset, see addon:PLAYER_LOGOUT()
 function addon:COMBAT_LOG_EVENT_UNFILTERED()
-	local _, eventType,_,_,_,_,_,dstGUID,dstName,dstFlags = CombatLogGetCurrentEventInfo()
-	if eventType == 'UNIT_DIED' and band(dstFlags,COMBATLOG_OBJECT_CONTROL_NPC)~=0 then
+	local _, eventType,_,srcGUID,srcName,_,_,dstGUID,dstName,dstFlags = CombatLogGetCurrentEventInfo()
+	if eventType == 'UNIT_DIED' and band(dstFlags,COMBATLOG_OBJECT_TYPE_NPC)~=0 then
 		if inInstance and not resets[curZoneName] and IsDungeon() then
 			LockAddInstance(curZoneName) -- register used instance
 			timer:Play()
@@ -1297,6 +1329,21 @@ function addon:COMBAT_LOG_EVENT_UNFILTERED()
 			session.countMobs = session.countMobs + 1
 			session.killedMobs[dstName] = (session.killedMobs[dstName] or 0) + 1
 			combatCurKills = (combatCurKills or 0) + 1
+			if not session.zoneName then session.zoneName = curZoneName end
+		end
+	end
+end
+
+-- session control on first boot or reload UI
+function SessionRecover()
+	if session.startTime then -- this is a reload UI
+		SessionStart(true)
+	else -- login
+		if config.farmAutoFinish then -- and time()-(session.endTime or 0) > 300 then -- close last session
+			SessionFinish()
+		end
+		if config.farmAutoStart then -- open a new session
+			SessionStart(true)
 		end
 	end
 end
@@ -1327,9 +1374,6 @@ addon:SetScript("OnEvent", function(frame, event, name)
 		SavePosition()
 		RestorePosition()
 	end )
-	-- background texture
-	texture = addon:CreateTexture()
-	texture:SetAllPoints()
 	-- text left
 	textl = addon:CreateFontString()
 	-- text right
@@ -1413,9 +1457,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	-- frame size & appearance
 	LayoutFrame()
 	-- session
-	if session.startTime then
-		SessionStart(true)
-	end
+	SessionRecover()
 	-- mainframe initial visibility
 	addon:SetShown( config.visible and (not config.farmZones or config.reloadUI) )
 end)
@@ -1636,11 +1678,12 @@ do
 		end
 		menu.init = nil -- means do not call the function anymore
 	end
-	local function SetBackground()
-		texture:SetColorTexture( unpack(config.backColor or COLOR_TRANSPARENT) )
-	end
 	local function SetWidth(info)
 		config.frameWidth = info.value~=0 and math.max( (config.frameWidth or addon:GetWidth()) + info.value, 50) or nil
+		LayoutFrame()
+	end
+	local function SetMargin(info)
+		config.frameMargin = info.value~=0 and math.max( (config.frameMargin or 4) + info.value, 0) or 4
 		LayoutFrame()
 	end
 	local function SetFontSize(info)
@@ -1683,7 +1726,7 @@ do
 		LayoutFrame()
 	end
 	local function getSessionText()
-		return (session.startTime and L['Session Pause']) or (session.duration and L['Session Continue']) or L['Session Start']
+		return (session.startTime and L['Session Pause']) or (session.duration and L['Session Resume']) or L['Session Start']
 	end
 	local function setSessionFinish()
 		addon:ConfirmDialog( L["Are you sure you want to finish current farm session ?"], SessionFinish )
@@ -1704,20 +1747,12 @@ do
 			addon:ZONE_CHANGED_NEW_AREA()
 			wipeMenu(menuZones)
 		end
-		local function GetFarmWorld()
-			return config.farmWorld
-		end
-		local function SetFarmWorld()
-			config.farmWorld = (not config.farmWorld) or nil
-			addon:ZONE_CHANGED_NEW_AREA()
-		end
 		menuZones = { init = function(menu)
 			if not menu[1] then
 				for zone in pairs(config.farmZones or {}) do
 					menu[#menu+1] = { text = '(-)'..zone, value = zone, notCheckable = true, func = ZoneDel }
 				end
 				menu[#menu+1] = { text = L['(+)Add Current Zone'], notCheckable = true, func = ZoneAdd }
-				menu[#menu+1] = { text = L['World Farm Mode'],  isNotRadio = true, keepShownOnClick = 1, checked = GetFarmWorld, func = SetFarmWorld }
 			end
 		end	}
 	end
@@ -1911,6 +1946,27 @@ do
 		menuFonts  = { init = function(menu)
 			local media = LibStub("LibSharedMedia-3.0", true)
 			for name, key in pairs(media and media:HashTable('font') or FONTS) do
+				tinsert( menu, { text = name, value = key, keepShownOnClick = 1, func = set, checked = checked } )
+			end
+			splitMenu(menu)
+			menu.init = nil -- do not call this init function anymore
+		end }
+	end
+
+	-- submenu: background textures
+	local menuBorderTextures
+	do
+		local function set(info)
+			config.borderTexture = info.value~='' and info.value or nil
+			SetBackground()
+			refreshMenu()
+		end
+		local function checked(info)
+			return info.value == (config.borderTexture or '')
+		end
+		menuBorderTextures  = { init = function(menu)
+			local media = LibStub("LibSharedMedia-3.0", true)
+			for name, key in pairs(media and media:HashTable('border') or BORDERS) do
 				tinsert( menu, { text = name, value = key, keepShownOnClick = 1, func = set, checked = checked } )
 			end
 			splitMenu(menu)
@@ -2211,7 +2267,7 @@ do
 	-- menu: main
 	local menuMain = {
 		{ text = L['Kiwi Farm [/kfarm]'], notCheckable = true, isTitle = true },
-		{ text = getSessionText,       notCheckable = true, func = SessionTogglePause },
+		{ text = getSessionText, notCheckable = true, func = SessionTogglePause },
 		{ text = L['Session Finish'],     notCheckable = true, disabled = function() return not (session.startTime or session.duration) end, func = setSessionFinish },
 		{ text = L['Reset Instances'],    notCheckable = true, func = ResetInstances },
 		{ text = L['Reset XP Info'],      notCheckable = true, func = LevelingReset },
@@ -2222,7 +2278,11 @@ do
 		{ text = L['Totals'],             notCheckable = true, hasArrow = true, value = 'total',   menuList = menuStats },
 		{ text = L['Resets'],             notCheckable = true, hasArrow = true, menuList = menuResets },
 		{ text = L['Settings'],           notCheckable = true, isTitle = true },
-		{ text = L['Farming Zones'],      notCheckable = true, hasArrow = true, menuList = menuZones },
+		{ text = L['Session Control'], notCheckable = true, hasArrow = true, menuList = {
+			{ text = L['Start/Resume session on Login'],   isNotRadio = true, keepShownOnClick = 1, checked = function() return config.farmAutoStart; end, func = function() config.farmAutoStart = (not config.farmAutoStart) or nil; end },
+			{ text = L['Finish session on Logout'], isNotRadio = true, keepShownOnClick = 1, checked = function() return config.farmAutoFinish; end, func = function() config.farmAutoFinish = (not config.farmAutoFinish) or nil; end },
+			{ text = L['Start session on entering Zones'],  isNotRadio = true, keepShownOnClick = 1, checked = function() return not config.farmDisableZones; end, func = function() config.farmDisableZones = (not config.farmDisableZones) or nil; end, hasArrow = true, menuList = menuZones },
+		} },
 		{ text = L['Display Info'], notCheckable= true, hasArrow = true, menuList = {
 			{ text = L['Lock&Resets'],      value = 'reset',      isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
 			{ text = L['Mobs&Items Count'], value = 'count',      isNotRadio = true, keepShownOnClick = 1, checked = DisplayChecked, func = SetDisplay },
@@ -2271,12 +2331,22 @@ do
 				{ text = L['Decrease(-)'],   value = -1,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
 				{ text = L['Default'],       value =  0,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
 			} },
-			{ text = L['Text Font'], notCheckable= true, hasArrow = true, menuList = menuFonts },
+			{ text = L['Frame Margin'], notCheckable= true, hasArrow = true, menuList = {
+				{ text = L['Increase(+)'],   value =  1,  notCheckable= true, keepShownOnClick=1, func = SetMargin },
+				{ text = L['Decrease(-)'],   value = -1,  notCheckable= true, keepShownOnClick=1, func = SetMargin },
+				{ text = L['Default'],       value =  0,  notCheckable= true, keepShownOnClick=1, func = SetMargin },
+			} },
 			{ text = L['Text Size'], notCheckable= true, hasArrow = true, menuList = {
 				{ text = L['Increase(+)'],  value =  1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 				{ text = L['Decrease(-)'],  value = -1,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 				{ text = L['Default (14)'], value =  0,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 			} },
+			{ text = L['Text Font'], notCheckable= true, hasArrow = true, menuList = menuFonts },
+			{ text = L['Border Texture'], notCheckable= true, hasArrow = true, menuList = menuBorderTextures },
+			{ text =L['Border color '], notCheckable = true, hasColorSwatch = true, hasOpacity = true,
+				get = function() return unpack(config.borderColor) end,
+				set = function(info, ...) config.borderColor = {...}; SetBackground(); end,
+			},
 			{ text =L['Background color '], notCheckable = true, hasColorSwatch = true, hasOpacity = true,
 				get = function() return unpack(config.backColor) end,
 				set = function(info, ...) config.backColor = {...}; SetBackground(); end,
