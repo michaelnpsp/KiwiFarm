@@ -1325,6 +1325,7 @@ end
 -- addon:COMBAT_LOG_EVENT_UNFILTERED()
 do
 	local COMBATLOG_OBJECT_TYPE_NPC = COMBATLOG_OBJECT_TYPE_NPC
+	local CombatLogGetCurrentEventInfo = CombatLogGetCurrentEventInfo
 	local Events = {
 		UNIT_DIED = true,
 		SPELL_DAMAGE = true,
