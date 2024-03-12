@@ -40,7 +40,14 @@ local MAX_PLAYER_LEVEL_TABLE = {
 	[8] = 60,  -- ShadowLands
 	[9] = 70,  -- Dragonflight
 }
-local isPlayerLeveling = UnitLevel('player') < (MAX_PLAYER_LEVEL_TABLE[GetExpansionLevel()] or 0)
+local isPlayerLeveling
+do
+	local isSoD = C_Seasons and C_Seasons.GetActiveSeason and C_Seasons.GetActiveSeason()==2 -- season of discovery
+	local level = UnitLevel('player')
+	local levelMax = (MAX_PLAYER_LEVEL_TABLE[GetExpansionLevel()] or 0)
+	local levelCap = isSoD and level<=40 and 40
+	isPlayerLeveling = level < (levelCap or levelMax)
+end
 
 -- default values
 local RESET_MAX = CLASSIC and 5 or 10
