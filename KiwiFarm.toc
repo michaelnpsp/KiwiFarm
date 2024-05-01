@@ -3,6 +3,7 @@
 ## Interface-Classic: 11502
 ## Interface-BCC: 20504
 ## Interface-Wrath: 30403
+## Interface-Cata: 40400
 ## Title: |cFF7FFF72Kiwi|r Farm
 ## Notes: Reset & Gold Tracker
 ## Author: MiCHaeL
