@@ -32,7 +32,7 @@ local MAX_PLAYER_LEVEL_TABLE = {
 	[0] = 60,  -- Vanilla
 	[1] = 70,  -- TBC
 	[2] = 80,  -- Wotlk
-	[3] = 95,  -- Cataclism
+	[3] = 85,  -- Cataclism
 	[4] = 90,  -- MoP
 	[5] = 100, -- WoD
 	[6] = 110, -- Legion
@@ -45,7 +45,7 @@ do
 	local isSoD = C_Seasons and C_Seasons.GetActiveSeason and C_Seasons.GetActiveSeason()==2 -- season of discovery
 	local level = UnitLevel('player')
 	local levelMax = (MAX_PLAYER_LEVEL_TABLE[GetExpansionLevel()] or 0)
-	local levelCap = isSoD and level<=40 and 40
+	local levelCap = isSoD and level<=50 and 50
 	isPlayerLeveling = level < (levelCap or levelMax)
 end
 
