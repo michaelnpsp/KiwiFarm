@@ -1557,6 +1557,20 @@ do
 	-- generic & enhanced popup menu management code, reusable for other menus
 	local showMenu, refreshMenu, getMenuLevel, getMenuValue
 	do
+		-- color picker management
+		local function picker_get_alpha()
+			local a = ColorPickerFrame.SetupColorPickerAndShow and ColorPickerFrame:GetColorAlpha() or OpacitySliderFrame:GetValue()
+			return WOW_PROJECT_ID~=WOW_PROJECT_MAINLINE and 1-a or a
+		end
+		local function picker_get_prev_color(c)
+			local r, g, b, a
+			if ColorPickerFrame.SetupColorPickerAndShow then
+				r, g, b, a = ColorPickerFrame:GetPreviousValues()
+			else
+				r, g, b, a = c.r, c.g, c.b, c.opacity
+			end
+			return r, g, b, (WOW_PROJECT_ID~=WOW_PROJECT_MAINLINE and 1-a or a)
+		end
 		-- menu initialization: special management of enhanced menuList tables, using fields not supported by the base UIDropDownMenu code.
 		local function initialize( frame, level, menuList )
 			if level then
@@ -1587,8 +1601,8 @@ do
 							if not item.swatchFunc then
 								local get, set = item.get, item.set
 								item.swatchFunc  = function() local r,g,b,a = get(item); r,g,b = ColorPickerFrame:GetColorRGB(); set(item,r,g,b,a) end
-								item.opacityFunc = function() local r,g,b   = get(item); set(item, r,g,b,1-OpacitySliderFrame:GetValue()) end
-								item.cancelFunc  = function(c) set(item, c.r, c.g, c.b, 1-c.opacity) end
+								item.opacityFunc = function() local r,g,b = get(item); set(item,r,g,b,picker_get_alpha()); end
+								item.cancelFunc = function(c) set(item, picker_get_prev_color(c)); end
 							end
 							item.r, item.g, item.b, item.opacity = item.get(item)
 							item.opacity = 1 - item.opacity
