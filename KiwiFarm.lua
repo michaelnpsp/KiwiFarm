@@ -16,6 +16,7 @@ local CLASSIC = VERSION<40000 or nil
 local RETAIL  = VERSION>=40000 or nil
 
 -- addon version
+local GetAddOnInfo = C_AddOns and C_AddOns.GetAddOnInfo or GetAddOnInfo
 local GetAddOnMetadata = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
 local versionToc = GetAddOnMetadata(addonName, "Version")
 local versionStr = (versionToc=='\@project-version\@' and 'Dev' or versionToc)
@@ -54,6 +55,7 @@ local RESET_MAX = CLASSIC and 5 or 10
 local RESET_DAY = 30
 local COLOR_WHITE = { 1,1,1,1 }
 local COLOR_TRANSPARENT = { 0,0,0,0 }
+local ITEM_QUALITY_COLORS = ITEM_QUALITY_COLORS
 local FONTS = (GetLocale() == 'zhCN') and {
 	Arial = 'Fonts\\ARHei.TTF',
 	FrizQT = 'Fonts\\ARHei.TTF',
@@ -367,8 +369,13 @@ local function strfirstword(str)
 	return strmatch(str, "^(.-) ") or str
 end
 
+local function GetItemQualityColorHex(i)
+	local color = ITEM_QUALITY_COLORS[i]
+	return color and color.hex or '|cFFffffff'
+end
+
 local function FmtQuality(i)
-	return format( "|c%s%s|r", select(4,GetItemQualityColor(i)), _G['ITEM_QUALITY'..i..'_DESC'] )
+	return format( "%s%s|r", GetItemQualityColorHex(i), _G['ITEM_QUALITY'..i..'_DESC'] )
 end
 
 local function FmtDuration(seconds)
