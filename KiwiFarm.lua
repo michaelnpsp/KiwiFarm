@@ -564,6 +564,14 @@ do
 				print(L['|cFF7FFF72KiwiFarm:|r Warning, MikScrollingCombatText addon is not installed, change the notifications setup or install MSBT.'])
 			end
 		end,
+		parrot = function(itemLink, quantity, money)
+			if Parrot then
+				local text = fmtLoot(itemLink, quantity, money)
+				Parrot:ShowMessage(text, "Notification")
+			else
+				print(L['|cFF7FFF72KiwiFarm:|r Warning, Parrot2 addon is not installed, change the notifications setup or install Parrot2.'])
+			end
+		end,
 		sound = function(_, _, _, groupKey)
 			local sound = notify.sound[groupKey]
 			if sound then PlaySoundFile(sound, "master") end
@@ -1843,7 +1851,7 @@ do
 			{ text = L['Aux: Market Value'],           value = 'Aux:Market',     arg1 = 'Aux', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
 			{ text = L['Aux: Min Buyout'],             value = 'Aux:MinBuyout',  arg1 = 'Aux', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
 			{ text = L['Aux: Disenchant'],             value = 'Aux:Disenchant', arg1 = 'Aux', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
-			{ text = L['RECrystallize: Market Value'], value = 'REC:Market',     arg1 = 'REC', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },			
+			{ text = L['RECrystallize: Market Value'], value = 'REC:Market',     arg1 = 'REC', isNotRadio = true, keepShownOnClick = 1, checked = checked, func = set },
 			init = InitPriceSources
 		}
 	end
@@ -2103,9 +2111,10 @@ do
 		end
 		menuNotify = {
 			{ text = initText, useParentValue = true, arg1 = 'chat',   arg2 = L['Chat Text'],   		    isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
-			{ text = initText, useParentValue = true, arg1 = 'combat', arg2 = L['CombatText: Scroll'],     isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
-			{ text = initText, useParentValue = true, arg1 = 'crit',   arg2 = L['CombatText: Crit'],       isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
-			{ text = initText, useParentValue = true, arg1 = 'msbt',   arg2 = L['MSBT: Notification'], 	isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'combat', arg2 = L['CombatText: Scroll'],   	isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'crit',   arg2 = L['CombatText: Crit'],    	isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'msbt',   arg2 = L['MSBT: Notification'], 	    isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'parrot', arg2 = L['Parrot2: Notification'], 	isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
 			{ text = initText, useParentValue = true, arg1 = 'sound',  arg2 = L['Sound'],       		    isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
 			init = function(menu, level)
 				local groupKey = getMenuValue(level)
