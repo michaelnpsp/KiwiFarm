@@ -153,6 +153,7 @@ local DEFCONFIG = {
 	priceByQuality = { [0]={vendor=true}, [1]={vendor=true}, [2]={vendor=true}, [3]={vendor=true}, [4]={vendor=true}, [5]={vendor=true} },
 	ignoreEnchantingMats = nil,
 	-- loot notification
+	notifyArea = nil,
 	notify = { [1]={chat=0}, [2]={chat=0}, [3]={chat=0}, [4]={chat=0}, [5]={chat=0}, sound={} },
 	-- session control, farming zones
 	farmZones = nil,
@@ -559,7 +560,7 @@ do
 		msbt = function(itemLink, quantity, money)
 			if MikSBT then
 				local text = fmtLoot(itemLink, quantity, money)
-				MikSBT.DisplayMessage(text, MikSBT.DISPLAYTYPE_NOTIFICATION, false, 255, 255, 255)
+				MikSBT.DisplayMessage(text, config.notifyArea or MikSBT.DISPLAYTYPE_NOTIFICATION, false, 255, 255, 255)
 			else
 				print(L['|cFF7FFF72KiwiFarm:|r Warning, MikScrollingCombatText addon is not installed, change the notifications setup or install MSBT.'])
 			end
@@ -567,7 +568,7 @@ do
 		parrot = function(itemLink, quantity, money)
 			if Parrot then
 				local text = fmtLoot(itemLink, quantity, money)
-				Parrot:ShowMessage(text, "Notification")
+				Parrot:ShowMessage(text, config.notifyArea or "Notification")
 			else
 				print(L['|cFF7FFF72KiwiFarm:|r Warning, Parrot2 addon is not installed, change the notifications setup or install Parrot2.'])
 			end
@@ -1791,6 +1792,36 @@ do
 	local function setSessionFinish()
 		addon:ConfirmDialog( L["Are you sure you want to finish current farm session ?"], SessionFinish )
 	end
+	local function NotifyAreaChecked(info)
+		local name = config.notifyArea or 'Notification'
+		if info and info.value~='' then
+			return info.value == name
+		else
+			return name~='Notification' and name~='Incoming' and name~='Outgoing'
+		end
+	end
+	local function SetNotifyArea(info)
+		if info.value~='' then
+			config.notifyArea = (info.value~='Notification') and info.value or nil
+		else
+			addon:EditDialog(L['|cFF7FFF72KiwiFarm|r\nChange the MkSBT/Parrot2 Scroll Area name to display KiwiFarm notifications. You can leave the field blank to use the default value.'], config.notifyArea or 'Notification', function(v)
+				config.notifyArea = v~='Notification' and v or nil
+			end)
+		end
+	end
+	local function GetNotifyArea(info)
+		return NotifyAreaChecked() and L['Custom: ']..config.notifyArea or L['Set Custom Area']
+	end
+	local function GetNotifyAreaTitle()
+		if MikSBT and not Parrot then
+			return L['MSBT Scroll Area']
+		elseif Parrot and not MikSBT then
+			return L['Parrot2 Scroll Area']
+		else
+			return L['MSBT/Parrot2 Scroll Area']
+		end
+	end
+
 	-- submenu: farmZones
 	local menuZones
 	do
@@ -2076,13 +2107,18 @@ do
 	local menuNotify
 	do
 		-- info.value = qualityID | 'price' ; info.arg1 = 'chat'|'combat'|'crit'|'sound'
+		local notifyAddons =  { msbt = L['MSBT: '], parrot = L['Parrot2: '] }
+		local function notifyText(info)
+			local msg = notifyAddons[info.arg1]
+			return msg and msg..(config.notifyArea or 'Notification') or info.arg2
+		end
 		local function initText(info, level)
 			local groupKey = info.value
 			if type(groupKey) ~= 'number' then -- special cases ('price' and 'money' groups notifications require a minimum price/gold amount)
 				local price = notify[groupKey] and notify[groupKey][info.arg1]
-				return price and format("%s (+%s)", info.arg2, FmtMoneyShort(price)) or format(L["%s (click to set price)"], info.arg2)
+				return price and format("%s (+%s)", notifyText(info), FmtMoneyShort(price)) or format(L["%s (click to set price)"], notifyText(info))
 			end
-			return info.arg2
+			return notifyText(info)
 		end
 		local function checked(info)
 			local groupKey, channelKey = info.value, info.arg1
@@ -2113,8 +2149,8 @@ do
 			{ text = initText, useParentValue = true, arg1 = 'chat',   arg2 = L['Chat Text'],   		    isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
 			{ text = initText, useParentValue = true, arg1 = 'combat', arg2 = L['CombatText: Scroll'],   	isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
 			{ text = initText, useParentValue = true, arg1 = 'crit',   arg2 = L['CombatText: Crit'],    	isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
-			{ text = initText, useParentValue = true, arg1 = 'msbt',   arg2 = L['MSBT: Notification'], 	    isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
-			{ text = initText, useParentValue = true, arg1 = 'parrot', arg2 = L['Parrot2: Notification'], 	isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'msbt',   arg2 = 'MSBT', 	    				isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
+			{ text = initText, useParentValue = true, arg1 = 'parrot', arg2 = 'Parrot2', 					isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
 			{ text = initText, useParentValue = true, arg1 = 'sound',  arg2 = L['Sound'],       		    isNotRadio = true, keepShownOnClick = 1, checked = checked, func = setNotify },
 			init = function(menu, level)
 				local groupKey = getMenuValue(level)
@@ -2440,7 +2476,13 @@ do
 				{ text = '999|cffffd70ag|r', 								 value = '%d|cffffd70ag|r', 				checked = MoneyFmtChecked, func = SetMoneyFmt },
 			} },
 			{ text = L['Data Collection'], notCheckable= true, hasArrow = true, menuList = menuCollect },
-			{ text = L['Reset Notification'],   notCheckable= true, hasArrow = true, menuList = menuResetNotify },
+			{ text = L['Reset Notification'],   notCheckable = true, hasArrow = true, menuList = menuResetNotify },
+			{ text = GetNotifyAreaTitle, notCheckable = true, hasArrow = true, menuList = {
+				{ text = 'Notification', value = 'Notification', checked = NotifyAreaChecked, func = SetNotifyArea },
+				{ text = 'Incoming',     value = 'Incoming',     checked = NotifyAreaChecked, func = SetNotifyArea },
+				{ text = 'Outgoing',     value = 'Outgoing',     checked = NotifyAreaChecked, func = SetNotifyArea },
+				{ text = GetNotifyArea,  value = '',             checked = NotifyAreaChecked, func = SetNotifyArea },
+			} },
 		} },
 		{ text = L['Profiles'], notCheckable = true, hasArrow = true, menuList = {
 			{ text = L['Profile per Character'], isNotRadio = true, keepShownOnClick = 1, checked = function() return root.profilePerChar[charKey] end,
