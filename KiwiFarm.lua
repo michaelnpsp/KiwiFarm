@@ -45,11 +45,10 @@ local MAX_PLAYER_LEVEL_TABLE = {
 
 local isPlayerLeveling
 do
-	local isSoD = C_Seasons and C_Seasons.GetActiveSeason and C_Seasons.GetActiveSeason()==2 -- season of discovery
+	-- local isSoD = C_Seasons and C_Seasons.GetActiveSeason and C_Seasons.GetActiveSeason()==2 -- season of discovery
 	local level = UnitLevel('player')
 	local levelMax = (MAX_PLAYER_LEVEL_TABLE[GetExpansionLevel()] or 0)
-	local levelCap = isSoD and level<=50 and 50
-	isPlayerLeveling = level < (levelCap or levelMax)
+	isPlayerLeveling = level < levelMax
 end
 
 -- default values
