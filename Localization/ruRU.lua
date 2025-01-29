@@ -127,5 +127,7 @@ L['Profile per Character'] = 'Профиль на персонажа'
 -- L['Reset Message'] = ''
 -- L['Notification Channels'] = ''
 -- L['|cFF7FFF72KiwiFarm|r\nSet a message to send to your party or raid when instances are reset. You can leave the field blank to disable the notification.'] = ''
+
 -- L['Set other ...'] = ''
 -- L['Other: '] = ''
+-- L['|cFF7FFF72KiwiFarm|r\nChange the MSBT/Parrot2 Scroll Area name to display KiwiFarm notifications. You can leave the field blank to use the default value.'] = ''

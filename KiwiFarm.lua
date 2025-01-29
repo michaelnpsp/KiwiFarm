@@ -1804,7 +1804,7 @@ do
 		if info.value~='' then
 			config.notifyArea = (info.value~='Notification') and info.value or nil
 		else
-			addon:EditDialog(L['|cFF7FFF72KiwiFarm|r\nChange the MkSBT/Parrot2 Scroll Area name to display KiwiFarm notifications. You can leave the field blank to use the default value.'], config.notifyArea or 'Notification', function(v)
+			addon:EditDialog(L['|cFF7FFF72KiwiFarm|r\nChange the MSBT/Parrot2 Scroll Area name to display KiwiFarm notifications. You can leave the field blank to use the default value.'], config.notifyArea or 'Notification', function(v)
 				v = strtrim(v); config.notifyArea = (v~='Notification' and v~='') and v or nil
 			end)
 		end
