@@ -5,6 +5,7 @@ if not L then return end
 L['%sYou loot %s'] = '%s你拾取了 %s'
 L['|cFF7FFF72KiwiFarm:|r Warning, Blizzard Floating Combat Text is not enabled, change the notifications setup or goto Interface Options>Combat to enable this feature.'] = '|cFF7FFF72KiwiFarm:|r 未启用浮动战斗信息，请修改设置或者开启战斗文字功能（ESC-界面设置-战斗）'
 L['|cFF7FFF72KiwiFarm:|r Warning, MikScrollingCombatText addon is not installed, change the notifications setup or install MSBT.'] = '|cFF7FFF72KiwiFarm:|r 未安装插件MikScrollingCombatText，请修改设置或者安装MSBT'
+L['|cFF7FFF72KiwiFarm:|r Warning, Parrot2 addon is not installed, change the notifications setup or install Parrot2.'] = '|cFF7FFF72KiwiFarm:|r 未安装插件Parrot2，请修改设置或者安装Parrot2'
 L['|cFF7FFF72KiwiFarm:|r\nSession:\n'] = '|cFF7FFF72KiwiFarm:|r\n本次：\n'
 L['Resets:\n'] = '重置：\n'
 L['Mobs killed:\n'] = '击杀数：\n'
@@ -105,6 +106,7 @@ L['Text Size'] = '字体大小'
 L['Default (14)'] = '默认（14）'
 L['Background color '] = '背景色'
 L['Hide Window'] = '隐藏'
+
 -- TODO
 L['Gold quests'] = 'Gold quests'
 L['Gold quests:\n'] = 'Gold quests:\n'
@@ -120,3 +122,10 @@ L['Identify Chat Frames'] = 'Identify Chat Frames'
 
 L['Profiles'] = 'Profiles'
 L['Profile per Character'] = 'Profile per Character'
+
+-- L['Reset Notification'] = ''
+-- L['Reset Message'] = ''
+-- L['Notification Channels'] = ''
+-- L['|cFF7FFF72KiwiFarm|r\nSet a message to send to your party or raid when instances are reset. You can leave the field blank to disable the notification.'] = ''
+-- L['Set other ...'] = ''
+-- L['Other: '] = ''

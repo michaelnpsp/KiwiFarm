@@ -4,6 +4,7 @@ if not L then return end
 L['%sYou loot %s'] = '%sВы собрали %s'
 L['|cFF7FFF72KiwiFarm:|r Warning, Blizzard Floating Combat Text is not enabled, change the notifications setup or goto Interface Options>Combat to enable this feature.'] = '|cFF7FFF72KiwiFarm:|r Внимание, всплывающий текст боя Blizzard не включен, измените настройки уведомлений или перейдите в Параметры интерфейса>Бой, чтобы включить эту функцию.'
 L['|cFF7FFF72KiwiFarm:|r Warning, MikScrollingCombatText addon is not installed, change the notifications setup or install MSBT.'] = '|cFF7FFF72KiwiFarm:|r Внимание, дополнение MikScrollingCombatText не установлено, измените настройки уведомлений или установите MSBT.'
+L['|cFF7FFF72KiwiFarm:|r Warning, Parrot2 addon is not installed, change the notifications setup or install Parrot2.'] = '|cFF7FFF72KiwiFarm:|r Внимание, дополнение Parrot2 не установлено, измените настройки уведомлений или установите Parrot2.'
 L['|cFF7FFF72KiwiFarm:|r\nSession:\n'] = '|cFF7FFF72KiwiFarm:|r\nСессия:\n'
 L['Resets:\n'] = 'Сбросы:\n'
 L['Mobs killed:\n'] = 'Убитые монстры:\n'
@@ -121,3 +122,10 @@ L['Identify Chat Frames'] = 'Определить окно чата'
 
 L['Profiles'] = 'Профили'
 L['Profile per Character'] = 'Профиль на персонажа'
+
+-- L['Reset Notification'] = ''
+-- L['Reset Message'] = ''
+-- L['Notification Channels'] = ''
+-- L['|cFF7FFF72KiwiFarm|r\nSet a message to send to your party or raid when instances are reset. You can leave the field blank to disable the notification.'] = ''
+-- L['Set other ...'] = ''
+-- L['Other: '] = ''

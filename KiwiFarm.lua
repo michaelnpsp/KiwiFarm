@@ -1805,12 +1805,12 @@ do
 			config.notifyArea = (info.value~='Notification') and info.value or nil
 		else
 			addon:EditDialog(L['|cFF7FFF72KiwiFarm|r\nChange the MkSBT/Parrot2 Scroll Area name to display KiwiFarm notifications. You can leave the field blank to use the default value.'], config.notifyArea or 'Notification', function(v)
-				config.notifyArea = v~='Notification' and v or nil
+				v = strtrim(v); config.notifyArea = (v~='Notification' and v~='') and v or nil
 			end)
 		end
 	end
 	local function GetNotifyArea(info)
-		return NotifyAreaChecked() and L['Custom: ']..config.notifyArea or L['Set Custom Area']
+		return NotifyAreaChecked() and L['Other: ']..config.notifyArea or L['Set other ...']
 	end
 	local function GetNotifyAreaTitle()
 		if MikSBT and not Parrot then
