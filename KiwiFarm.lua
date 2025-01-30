@@ -42,7 +42,6 @@ local MAX_PLAYER_LEVEL_TABLE = {
 	[9] = 70,  -- Dragonflight
 	[10] = 80, -- TWW
 }
-
 local isPlayerLeveling
 do
 	-- local isSoD = C_Seasons and C_Seasons.GetActiveSeason and C_Seasons.GetActiveSeason()==2 -- season of discovery
