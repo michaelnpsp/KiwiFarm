@@ -1575,6 +1575,12 @@ do
 	-- generic & enhanced popup menu management code, reusable for other menus
 	local showMenu, refreshMenu, getMenuLevel, getMenuValue
 	do
+		-- workaround for classic submenus bug, level 3 submenu only displays up to 8 items without this
+		local function FixClassicBug()
+			if CLASSIC and UIDROPDOWNMENU_MAXBUTTONS<=8 then
+				UIDropDownMenu_CreateFrames(3, 32)
+			end
+		end
 		-- color picker management
 		local function picker_get_alpha()
 			local a = ColorPickerFrame.SetupColorPickerAndShow and ColorPickerFrame:GetColorAlpha() or OpacitySliderFrame:GetValue()
@@ -1654,6 +1660,7 @@ do
 		end
 		-- show my enhanced popup menu
 		function showMenu(menuList, menuFrame, anchor, x, y, autoHideDelay )
+			FixClassicBug()
 			menuFrame = menuFrame or CreateFrame("Frame", "KiwiFarmPopupMenu", UIParent, "UIDropDownMenuTemplate")
 			menuFrame.displayMode = "MENU"
 			menuFrame.menuValues = menuFrame.menuValues  or {}
