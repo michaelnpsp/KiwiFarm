@@ -12,8 +12,8 @@ local L = LibStub('AceLocale-3.0'):GetLocale('KiwiFarm', true)
 
 -- game version
 local VERSION = select(4,GetBuildInfo())
-local CLASSIC = VERSION<40000 or nil
-local RETAIL  = VERSION>=40000 or nil
+local CLASSIC_ERA = VERSION<30000
+local RETAIL = VERSION>=90000
 
 -- addon version
 local GetAddOnInfo = C_AddOns and C_AddOns.GetAddOnInfo or GetAddOnInfo
@@ -51,7 +51,7 @@ do
 end
 
 -- default values
-local RESET_MAX = CLASSIC and 5 or 10
+local RESET_MAX = CLASSIC_ERA and 5 or 10
 local RESET_DAY = 30
 local COLOR_WHITE = { 1,1,1,1 }
 local COLOR_TRANSPARENT = { 0,0,0,0 }
@@ -67,7 +67,7 @@ local FONTS = (GetLocale() == 'zhCN') and {
 	Morpheus = 'Fonts\\MORPHEUS.TTF',
 	Skurri = 'Fonts\\SKURRI.TTF',
 }
-local SOUNDS = CLASSIC and {
+local SOUNDS = VANILA and {
 	["Auction Window Open"] = "sound/interface/auctionwindowopen.ogg",
 	["Auction Window Close"] = "sound/interface/auctionwindowclose.ogg",
 	["Coin" ] = "sound/interface/lootcoinlarge.ogg",
@@ -112,9 +112,9 @@ local DEFROOT = {
 
 local DEFSERVER = {
 	leveling = {}, 	-- leveling info per character
-	resetData = CLASSIC and {}, -- reset data per character for classic
-	resets    = RETAIL and {count=0,countd=0}, -- reset data per server for retail
-	resetsd   = RETAIL and {}, -- reset data per server for retail
+	resetData = CLASSIC_ERA and {}, -- reset data per character for classic
+	resets    = (not CLASSIC_ERA) and {count=0,countd=0}, -- reset data per server for retail
+	resetsd   = (not CLASSIC_ERA) and {}, -- reset data per server for retail
 }
 
 local DEFRESET = {
@@ -264,7 +264,7 @@ local function CreateDB()
 	local config = InitKeyDB( root, root.profilePerChar[charKey] and charKey or serverKey, DEFCONFIG, false, true)
 	InitDB(config.session, DEFDATA)
 	InitDB(config.total, DEFDATA)
-	if CLASSIC then -- move resets per realm to resets per char (due to blizzard hotfix) but only in classic version
+	if CLASSIC_ERA then -- move resets per realm to resets per char (due to blizzard hotfix) but only in classic version
 		local char = InitKeyDB( server.resetData, charKey, DEFRESET )
 		char.resetsd = server.resetsd or char.resetsd
 		char.resets = server.resets or char.resets
@@ -618,7 +618,7 @@ do
 	-- auctionator addon
 	local Auctionator_GetMarketPrice, Auctionator_GetDisenchantPrice, ItemUpgradeInfo
 	local function InitAuctionator()
-		if CLASSIC and Atr_GetAuctionPrice and Atr_CalcDisenchantPrice then -- auctionator ClassicFix (GepyFix)
+		if CLASSIC_ERA and Atr_GetAuctionPrice and Atr_CalcDisenchantPrice then -- auctionator ClassicFix (GepyFix)
 			ItemUpgradeInfo = LibStub('LibItemUpgradeInfo-1.0',true)
 			Auctionator_GetMarketPrice = function(name, itemID)
 				return Atr_GetAuctionPrice(name)
@@ -698,7 +698,7 @@ end
 local LockAddReset, LockAddInstance, LockDel, LockResetAll
 do
 	local function LockAddCharReset(zone, ctime, resets, resetsd)
-		if CLASSIC then
+		if CLASSIC_ERA then
 			resetsd[#resetsd+1] = ctime -- classic to track 30/24h limit
 		end
 		resets.count = resets.count + 1
@@ -714,7 +714,7 @@ do
 		resets[#resets+1] =  { zone = zone, time = ctime, reseted = ctime}
 	end
 	local function CheckPartyAlts(zone, ctime) -- reset of alts in party/raid for classic
-		if CLASSIC then
+		if CLASSIC_ERA then
 			local units = GetGroupRaidMembers()
 			if units then
 				for _,unit in ipairs(units) do
@@ -763,7 +763,7 @@ do
 				resets.count = resets.count + 1
 				resets[ resets[i].zone ] = nil
 				resets.countd = resets.countd - 1
-				if CLASSIC then
+				if CLASSIC_ERA then
 					resetsd[#resetsd+1] = ctime -- classic to track 30/24h limit
 				end
 			end
@@ -787,7 +787,7 @@ do
 		-- instance reset & lock info
 		if not disabled.reset then
 			text_header = text_header .. L["Resets:\n"]
-			if CLASSIC then
+			if CLASSIC_ERA then
 				text_mask   = text_mask .. "%s%d|r||%s%d|r||%s%02d:%02d|r\n"  -- last reset
 			else
 				text_mask   = text_mask .. "%s%d|r||%s%02d:%02d|r\n"  -- last reset
@@ -842,7 +842,7 @@ do
 		while (#resets>0 and resets[1].time<exptime) or #resets>RESET_MAX do -- remove old resets(>1hour)
 			LockDel(1)
 		end
-		if CLASSIC then
+		if CLASSIC_ERA then
 			local exptime = curtime - 86400
 			while (#resetsd>0 and resetsd[1]<exptime) or #resets>RESET_DAY do -- remove old daily resets for classic (>24hour)
 				tremove(resetsd,1)
@@ -875,7 +875,7 @@ do
 			local remain   = RESET_MAX-resets.count
 			local timeLock = #resets>0 and resets[1].time+3600 or nil
 			local sUnlock  = timeLock and timeLock-curtime or 0
-			if CLASSIC then
+			if CLASSIC_ERA then
 				local remaind = math.max( RESET_DAY - #resetsd, 0 )
 				data[#data+1] = (remaind>5 and '|cFF00ff00') or (remaind>0 and '|cFFff8000') or '|cFFff0000'
 				data[#data+1] =  remaind
@@ -1171,7 +1171,7 @@ end)
 local PATTERN_RESET = '^'..INSTANCE_RESET_SUCCESS:gsub("([^%w])","%%%1"):gsub('%%%%s','(.+)')..'$'
 local PATTERN_RESET_FAILED = '^'..INSTANCE_RESET_FAILED:gsub("([^%w])","%%%1"):gsub('%%%%s','(.+)')..'$'
 function addon:CHAT_MSG_SYSTEM(event,msg)
-	local zone = strmatch(msg,PATTERN_RESET) or ( CLASSIC and strmatch(msg,PATTERN_RESET_FAILED) )
+	local zone = strmatch(msg,PATTERN_RESET) or ( CLASSIC_ERA and strmatch(msg,PATTERN_RESET_FAILED) )
 	if zone then
 		LockAddReset(zone)
 		if addon:IsVisible() then
@@ -1577,7 +1577,7 @@ do
 	do
 		-- workaround for classic submenus bug, level 3 submenu only displays up to 8 items without this
 		local function FixClassicBug()
-			if CLASSIC and UIDROPDOWNMENU_MAXBUTTONS<=8 then
+			if not RETAIL and UIDROPDOWNMENU_MAXBUTTONS<=8 then
 				UIDropDownMenu_CreateFrames(3, 32)
 			end
 		end
@@ -1861,7 +1861,7 @@ do
 		for _,reset in ipairs(resets) do
 			defMenuAdd(menu, format(reset.reseted and "%s - %s" or "|cFF808080%s - %s|r", date("%H:%M:%S",reset.time), reset.zone) )
 		end
-		if CLASSIC and #resetsd>0 then
+		if CLASSIC_ERA and #resetsd>0 then
 			defMenuAdd(menu, format("|cFFf0f000Next Daily Unlock: |r%s", FmtDuration( math.max( resetsd[1]+86400-time(),0) ) ) )
 		end
 		defMenuEnd(menu, L['None'])
