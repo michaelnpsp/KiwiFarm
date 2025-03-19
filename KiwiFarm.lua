@@ -170,6 +170,7 @@ local DEFCONFIG = {
 	fontName  = nil,
 	fontsize  = nil,
 	frameMargin = 4,
+	frameStrata = nil,
 	framePos  = { anchor = 'TOPLEFT', x = 0, y = 0 },
 	-- minimap icon
 	minimapIcon = { hide = false },
@@ -1073,6 +1074,11 @@ local function LevelingInit()
 	server.leveling[charKey] = leveling -- assigning nil if player is at max level
 end
 
+-- restore frame strata
+local function RestoreStrata()
+	addon:SetFrameStrata(config.frameStrata or 'MEDIUM')
+end
+
 -- restore main frame position
 local function RestorePosition()
 	addon:ClearAllPoints()
@@ -1499,6 +1505,8 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	addon:RegisterEvent("PLAYER_ENTERING_WORLD")
 	addon:RegisterEvent("CHAT_MSG_SYSTEM")
 	addon:RegisterEvent("PLAYER_LOGOUT")
+	-- frame strata
+	RestoreStrata()
 	-- frame position
 	RestorePosition()
 	-- frame size & appearance
@@ -1757,6 +1765,13 @@ do
 	local function SetFontSize(info)
 		config.fontSize = info.value~=0 and math.max( (config.fontSize or 14) + info.value, 5) or 14
 		LayoutFrame()
+	end
+	local function StrataChecked(info)
+		return info.value == (config.frameStrata or 'MEDIUM')
+	end
+	local function SetStrata(info)
+		config.frameStrata = info.value~='MEDIUM' and info.value or nil
+		RestoreStrata()
 	end
 	local function AnchorChecked(info)
 		return info.value == config.framePos.anchor
@@ -2380,7 +2395,7 @@ do
 		{ text = getSessionText, notCheckable = true, func = SessionTogglePause },
 		{ text = L['Session Finish'],     notCheckable = true, disabled = function() return not (session.startTime or session.duration) end, func = setSessionFinish },
 		{ text = L['Reset Instances'],    notCheckable = true, func = ResetInstances },
-		{ text = L['Reset XP Info'],      notCheckable = true, func = LevelingReset },
+		{ text = L['Reset XP Info'],      notCheckable = true, func = LevelingReset, hidden = function() return not isPlayerLeveling end },
 		{ text = L['Statistics'],         notCheckable = true, isTitle = true },
 		{ text = L['Session'],            notCheckable = true, hasArrow = true, value = 'session', menuList = menuStats },
 		{ text = L['Daily'],              notCheckable = true, hasArrow = true, menuList = menuDaily },
@@ -2425,6 +2440,11 @@ do
 			{ text = L['Money looted'], value = 'money', notCheckable = true, hasArrow = true, menuList = menuNotify },
 		} },
 		{ text = L['Appearance'], notCheckable= true, hasArrow = true, menuList = {
+			{ text = L['Frame Strata'], notCheckable= true, hasArrow = true, menuList = {
+				{ text = L['HIGH'],    value = 'HIGH',   checked = StrataChecked, func = SetStrata },
+				{ text = L['MEDIUM'],  value = 'MEDIUM', checked = StrataChecked, func = SetStrata },
+				{ text = L['LOW'],     value = 'LOW',  	 checked = StrataChecked, func = SetStrata },
+			} },
 			{ text = L['Frame Anchor'], notCheckable= true, hasArrow = true, menuList = {
 				{ text = L['Top Left'],     value = 'TOPLEFT',     checked = AnchorChecked, func = SetAnchor },
 				{ text = L['Top Right'],    value = 'TOPRIGHT',    checked = AnchorChecked, func = SetAnchor },
