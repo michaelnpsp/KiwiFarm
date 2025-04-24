@@ -1098,6 +1098,7 @@ end
 
 -- change main frame visibility: nil == toggle visibility
 local function UpdateFrameVisibility(visible)
+	if not addon.plugin then return end
 	if visible == nil then
 		visible = not addon:IsShown()
 	end
@@ -1408,15 +1409,6 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	addon:Hide()
 	addon:SetSize(1,1)
 	addon:EnableMouse(true)
-	addon:SetMovable(true)
-	addon:RegisterForDrag("LeftButton")
-	addon:SetScript("OnDragStart", addon.StartMoving)
-	addon:SetScript("OnDragStop", function(self)
-		self:StopMovingOrSizing()
-		self:SetUserPlaced(false)
-		SavePosition()
-		RestorePosition()
-	end )
 	-- text left
 	textl = addon:CreateFontString()
 	-- text right
@@ -1450,7 +1442,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 			registerForAnyClick = true,
 			notCheckable = true,
 			func = function(_,_,_,_,button)
-				if button == 'RightButton' then
+				if button == 'RightButton' or addon.plugin then
 					addon:ShowMenu()
 				else
 					UpdateFrameVisibility()
@@ -1464,7 +1456,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 		label = GetAddOnInfo( addonName, "Title"),
 		icon  = iconTexture,
 		OnClick = function(self, button)
-			if button == 'RightButton' then
+			if button == 'RightButton' or addon.plugin then
 				addon:ShowMenu()
 			else
 				UpdateFrameVisibility()
@@ -1505,6 +1497,15 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	SessionRecover()
 	-- mainframe initial visibility
 	if not addon:SetupPlugin(iconTexture, "1.0", "Gold farm tracking.", "MiCHaEL") then
+		addon:SetMovable(true)
+		addon:RegisterForDrag("LeftButton")
+		addon:SetScript("OnDragStart", addon.StartMoving)
+		addon:SetScript("OnDragStop", function(self)
+			self:StopMovingOrSizing()
+			self:SetUserPlaced(false)
+			SavePosition()
+			RestorePosition()
+		end )
 		addon:SetShown( config.visible and (not config.farmZones or config.reloadUI) )
 	end
 end)

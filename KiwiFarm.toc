@@ -12,7 +12,7 @@
 ## X-Curse-Project-ID: 350500
 ## X-Wago-ID: 0mNw9BKo
 ## SavedVariables: KiwiFarmDB
-## OptionalDeps: LibSharedMedia-3.0, LibItemUpgradeInfo-1.0
+## OptionalDeps: Details, LibSharedMedia-3.0, LibItemUpgradeInfo-1.0
 
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.xml
