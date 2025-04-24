@@ -25,6 +25,9 @@ local versionStr = (versionToc=='\@project-version\@' and 'Dev' or versionToc)
 -- player GUID
 local playerGUID = UnitGUID("player")
 
+-- addon icon
+local iconTexture = "Interface\\AddOns\\KiwiFarm\\KiwiFarm.tga"
+
 -- database keys
 local serverKey = GetRealmName()
 local charKey   = UnitName("player") .. " - " .. serverKey
@@ -62,7 +65,7 @@ local FONTS = (GetLocale() == 'zhCN') and {
 	FrizQT = 'Fonts\\ARHei.TTF',
 	Morpheus = 'Fonts\\ARHei.TTF',
 	Skurri = 'Fonts\\ARHei.TTF',
-} or {
+	} or {
 	Arial = 'Fonts\\ARIALN.TTF',
 	FrizQT = 'Fonts\\FRIZQT__.TTF',
 	Morpheus = 'Fonts\\MORPHEUS.TTF',
@@ -1443,7 +1446,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	if AddonCompartmentFrame and AddonCompartmentFrame.RegisterAddon then
 		AddonCompartmentFrame:RegisterAddon({
 			text = "KiwiFarm",
-			icon  = "Interface\\AddOns\\KiwiFarm\\KiwiFarm.tga",
+			icon  = iconTexture,
 			registerForAnyClick = true,
 			notCheckable = true,
 			func = function(_,_,_,_,button)
@@ -1459,7 +1462,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	LibStub("LibDBIcon-1.0"):Register(addonName, LibStub("LibDataBroker-1.1"):NewDataObject(addonName, {
 		type  = "launcher",
 		label = GetAddOnInfo( addonName, "Title"),
-		icon  = "Interface\\AddOns\\KiwiFarm\\KiwiFarm",
+		icon  = iconTexture,
 		OnClick = function(self, button)
 			if button == 'RightButton' then
 				addon:ShowMenu()
@@ -1501,8 +1504,62 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	-- session
 	SessionRecover()
 	-- mainframe initial visibility
-	addon:SetShown( config.visible and (not config.farmZones or config.reloadUI) )
+	if not addon:SetupPlugin(iconTexture, "1.0", "Gold farm tracking.", "MiCHaEL") then
+		addon:SetShown( config.visible and (not config.farmZones or config.reloadUI) )
+	end
 end)
+
+-- ============================================================================
+-- details plugin
+-- ============================================================================
+
+function addon:SetupPlugin()
+	self.SetupPlugin = nil
+	if not config.details then return end
+	local Details = _G.Details
+	if not Details then print(string.format("%s warning: this addon is configured as a Details plugin but Details addon is not installed!", self:GetName())); return; end
+	local Plugin = Details:NewPluginObject("Details_"..self:GetName())
+	Plugin:SetPluginDescription( C_AddOns.GetAddOnMetadata("KiwiFarm", "Notes") )
+	self.plugin = Plugin
+	Plugin.OnDetailsEvent = function(self, event, ...)
+		local instance = self:GetPluginInstance()
+		if instance and (event == "SHOW" or instance == select(1,...)) then
+			self.Frame:SetSize(instance:GetSize())
+			addon.instance = instance
+			addon:SetFrameLevel(5)
+			LayoutFrame()
+		end
+	end
+	UpdateFrameSize = function(self)
+		local _, h = self.instance:GetSize()
+		local th = h-config.frameMargin*2
+		textl:SetHeight(th)
+		textr:SetHeight(th)
+		self:SetAlpha(1)
+	end
+	addon:SetScript("OnMouseUp", function(self, button)
+		if button == 'RightButton' and not IsShiftKeyDown() then
+			self.instance.windowSwitchButton:GetScript("OnMouseDown")(self.instance.windowSwitchButton, button)
+		elseif button == 'LeftButton' and IsShiftKeyDown() then
+			ResetInstances()
+		else
+			self:ShowMenu()
+		end
+	end)
+	Details:InstallPlugin("RAID", 'KiwiFarm', iconTexture, Plugin, "DETAILS_PLUGIN_KIWIFARM", 1, C_AddOns.GetAddOnMetadata("KiwiFarm", "Author"), versionStr)
+	Details:RegisterEvent(Plugin, "DETAILS_INSTANCE_ENDRESIZE")
+	Details:RegisterEvent(Plugin, "DETAILS_INSTANCE_SIZECHANGED")
+	Details:RegisterEvent(Plugin, "DETAILS_INSTANCE_STARTSTRETCH")
+	Details:RegisterEvent(Plugin, "DETAILS_INSTANCE_ENDSTRETCH")
+	Details:RegisterEvent(Plugin, "DETAILS_OPTIONS_MODIFIED")
+	-- reparent frame to details frame
+	self:Hide()
+	self:SetParent(Plugin.Frame)
+	self:ClearAllPoints()
+	self:SetAllPoints()
+	self:Show()
+	return true
+end
 
 -- ============================================================================
 -- config cmdline
@@ -1683,13 +1740,14 @@ do
 		function splitMenu(menu, fsort, fdisp)
 			local count = #menu
 			if count>1 then
+				local max = math.ceil( count/math.ceil(count/28) )
 				fsort = fsort or 'text'
 				fdisp = fdisp or fsort
 				table.sort(menu, function(a,b) return a[fsort]<b[fsort] end )
 				local items, first, last
-				if count>28 then
+				if count>max then
 					for i=1,count do
-						if not items or #items>=28 then
+						if not items or #items>=max then
 							if items then
 								menu[#menu].text = strfirstword(first[fdisp]) .. ' - ' .. strfirstword(last[fdisp])
 							end
@@ -1836,6 +1894,9 @@ do
 		else
 			return L['MSBT/Parrot2 Scroll Area']
 		end
+	end
+	local function isPlugin()
+		return config.details~=nil
 	end
 
 	-- submenu: farmZones
@@ -2434,12 +2495,12 @@ do
 			{ text = L['Money looted'], value = 'money', notCheckable = true, hasArrow = true, menuList = menuNotify },
 		} },
 		{ text = L['Appearance'], notCheckable= true, hasArrow = true, menuList = {
-			{ text = L['Frame Strata'], notCheckable= true, hasArrow = true, menuList = {
+			{ text = L['Frame Strata'], hidden = isPlugin, notCheckable= true, hasArrow = true, menuList = {
 				{ text = L['HIGH'],    value = 'HIGH',   checked = StrataChecked, func = SetStrata },
 				{ text = L['MEDIUM'],  value = 'MEDIUM', checked = StrataChecked, func = SetStrata },
 				{ text = L['LOW'],     value = 'LOW',  	 checked = StrataChecked, func = SetStrata },
 			} },
-			{ text = L['Frame Anchor'], notCheckable= true, hasArrow = true, menuList = {
+			{ text = L['Frame Anchor'], hidden = isPlugin, notCheckable= true, hasArrow = true, menuList = {
 				{ text = L['Top Left'],     value = 'TOPLEFT',     checked = AnchorChecked, func = SetAnchor },
 				{ text = L['Top Right'],    value = 'TOPRIGHT',    checked = AnchorChecked, func = SetAnchor },
 				{ text = L['Bottom Left'],  value = 'BOTTOMLEFT',  checked = AnchorChecked, func = SetAnchor },
@@ -2450,7 +2511,7 @@ do
 				{ text = L['Bottom'], 		 value = 'BOTTOM', 		checked = AnchorChecked, func = SetAnchor },
 				{ text = L['Center'], 		 value = 'CENTER', 		checked = AnchorChecked, func = SetAnchor },
 			} },
-			{ text = L['Frame Width'], notCheckable= true, hasArrow = true, menuList = {
+			{ text = L['Frame Width'], hidden = isPlugin, notCheckable= true, hasArrow = true, menuList = {
 				{ text = L['Increase(+)'],   value =  1,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
 				{ text = L['Decrease(-)'],   value = -1,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
 				{ text = L['Default'],       value =  0,  notCheckable= true, keepShownOnClick=1, func = SetWidth },
@@ -2505,14 +2566,22 @@ do
 				{ text = GetNotifyArea,  value = '',             checked = NotifyAreaChecked, func = SetNotifyArea },
 			} },
 		} },
-		{ text = L['Profiles'], notCheckable = true, hasArrow = true, menuList = {
+		{ text = L['System'], notCheckable = true, hasArrow = true, menuList = {
+			{ text = L['Details Plugin'], isNotRadio = true, keepShownOnClick = 1, checked = function() return config.details end,
+					func = function()
+						local msg = config.details and
+									L["KiwiFarm info will be displayed in a standalone window. Are you sure you want to disable KiwiFarm Details Plugin?"] or
+						            L["KiwiFarm info will be displayed in a Details window. Are you sure you want to enable KiwiFarm Details Plugin?"]
+						addon:ConfirmDialog( msg, function() config.details = not config.details or nil; ReloadUI(); end)
+					end,
+			},
 			{ text = L['Profile per Character'], isNotRadio = true, keepShownOnClick = 1, checked = function() return root.profilePerChar[charKey] end,
 					func = function() addon:ConfirmDialog( L["UI must be reloaded. Are you Sure?"], function()
 							root.profilePerChar[charKey] = not root.profilePerChar[charKey] or nil; ReloadUI();
 					end) end,
 			},
 		} },
-		{ text = L['Hide Window'], notCheckable = true, hidden = function() return not openedFromMain end, func = function() UpdateFrameVisibility(false); end },
+		{ text = L['Hide Window'], notCheckable = true, hidden = function() return not openedFromMain or addon.plugin~=nil end, func = function() UpdateFrameVisibility(false); end },
 	}
 	function addon:ShowMenu(fromMain)
 		openedFromMain = fromMain
