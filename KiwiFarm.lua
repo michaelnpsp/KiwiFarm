@@ -1098,7 +1098,7 @@ end
 
 -- change main frame visibility: nil == toggle visibility
 local function UpdateFrameVisibility(visible)
-	if not addon.plugin then return end
+	if addon.plugin then return end
 	if visible == nil then
 		visible = not addon:IsShown()
 	end
@@ -1106,7 +1106,34 @@ local function UpdateFrameVisibility(visible)
 	config.visible = visible
 end
 
+-- click on any launcher button
+local function MinimapButtonMouseClick(button)
+	if button == 'RightButton' or addon.plugin then
+		addon:ShowMenu()
+	else
+		UpdateFrameVisibility()
+	end
+end
+
+-- show tooltip on mouseover launcher button
+local function MinimapButtonTooltipShow(tooltip)
+	tooltip:AddDoubleLine("KiwiFarm", versionStr)
+	if session.startTime or session.duration then
+		local total, hourly, cash, quests, items, hh, mm = GetSessionGeneralStats()
+		local cc = session.startTime and '|cFF00ff00' or '|cFFff8000'
+		local ss = hh>0 and format("%s%dh %dm|r",cc,hh,mm) or format("%s%dm|r",cc,mm)
+		tooltip:AddDoubleLine(L["Session:"],    ss, 1,1,1)
+		tooltip:AddDoubleLine(L["Gold quests:"], FmtMoney(quests),  1,1,1, 1,1,1)
+		tooltip:AddDoubleLine(L["Gold cash:"],  FmtMoney(cash),   1,1,1, 1,1,1)
+		tooltip:AddDoubleLine(L["Gold items:"], FmtMoney(items),  1,1,1, 1,1,1)
+		tooltip:AddDoubleLine(L["Gold/hour:"],  FmtMoney(hourly), 1,1,1, 1,1,1)
+		tooltip:AddDoubleLine(L["Gold total:"], FmtMoney(total),  1,1,1, 1,1,1)
+	end
+	tooltip:AddLine(L["|cFFff4040Left Click|r toggle visibility\n|cFFff4040Right Click|r open menu"], 0.2, 1, 0.2)
+end
+
 local function SetBackground()
+	if addon.plugin then return end
 	if config.borderTexture then
 		addon:SetBackdrop({
 			bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -1302,7 +1329,7 @@ do
 					LockDel(1)
 				end
 				curZoneName = zone
-				if config.farmZones and not config.farmDisableZones then
+				if not addon.plugin and config.farmZones and not config.farmDisableZones then
 					if config.farmZones[zone] then
 						if lastZoneKey or time()-(session.endTime or 0)<300 then -- continue session if logout->login < 5 minutes
 							SessionStart()
@@ -1379,7 +1406,7 @@ do
 end
 
 -- session control on first boot or reload UI
-function SessionRecover()
+local function SessionRecover()
 	if session.startTime then -- this is a reload UI
 		SessionStart(true)
 	else -- login
@@ -1390,6 +1417,80 @@ function SessionRecover()
 			SessionStart(true)
 		end
 	end
+end
+
+-- ============================================================================
+-- Standalone window setup
+-- ============================================================================
+
+local function SetupStandaloneFrame()
+	addon:SetMovable(true)
+	addon:RegisterForDrag("LeftButton")
+	addon:SetScript("OnDragStart", addon.StartMoving)
+	addon:SetScript("OnDragStop", function(self)
+		self:StopMovingOrSizing()
+		self:SetUserPlaced(false)
+		SavePosition()
+		RestorePosition()
+	end )
+	RestoreStrata()
+	RestorePosition()
+	LayoutFrame()
+	SessionRecover()
+	addon:SetShown( config.visible and (not config.farmZones or config.reloadUI) )
+end
+
+-- ============================================================================
+-- details plugin setup
+-- ============================================================================
+
+local function SetupPluginFrame()
+	if not config.details then return end
+	local Details = _G.Details
+	if not Details then print("KiwiFarm warning: this addon is configured as a Details plugin but Details addon is not installed!"); return; end
+	local Plugin = Details:NewPluginObject("Details_KiwiFarm")
+	Plugin:SetPluginDescription( C_AddOns.GetAddOnMetadata("KiwiFarm", "Notes") )
+	addon.plugin = Plugin
+	LayoutFrame()
+	Plugin.OnDetailsEvent = function(self, event, ...)
+		local instance = self:GetPluginInstance()
+		if instance and (event == "SHOW" or instance == select(1,...)) then
+			self.Frame:SetSize(instance:GetSize())
+			addon.instance = instance
+			addon:SetFrameLevel(5)
+			LayoutFrame()
+		end
+	end
+	UpdateFrameSize = function(self)
+		local _, h = self.instance:GetSize()
+		local th = h-config.frameMargin*2
+		textl:SetHeight(th)
+		textr:SetHeight(th)
+		self:SetAlpha(1)
+	end
+	addon:SetScript("OnMouseUp", function(self, button)
+		if button == 'RightButton' and not IsShiftKeyDown() then
+			self.instance.windowSwitchButton:GetScript("OnMouseDown")(self.instance.windowSwitchButton, button)
+		elseif button == 'LeftButton' and IsShiftKeyDown() then
+			ResetInstances()
+		else
+			self:ShowMenu()
+		end
+	end)
+	Details:InstallPlugin("RAID", 'KiwiFarm', iconTexture, Plugin, "DETAILS_PLUGIN_KIWIFARM", 1, C_AddOns.GetAddOnMetadata("KiwiFarm", "Author"), versionStr)
+	Details:RegisterEvent(Plugin, "DETAILS_INSTANCE_ENDRESIZE")
+	Details:RegisterEvent(Plugin, "DETAILS_INSTANCE_SIZECHANGED")
+	Details:RegisterEvent(Plugin, "DETAILS_INSTANCE_STARTSTRETCH")
+	Details:RegisterEvent(Plugin, "DETAILS_INSTANCE_ENDSTRETCH")
+	Details:RegisterEvent(Plugin, "DETAILS_OPTIONS_MODIFIED")
+	-- reparent frame to details frame
+	addon:Hide()
+	addon:SetParent(Plugin.Frame)
+	addon:ClearAllPoints()
+	addon:SetAllPoints()
+	addon:Show()
+	SessionRecover()
+	return true
 end
 
 -- ============================================================================
@@ -1441,13 +1542,7 @@ addon:SetScript("OnEvent", function(frame, event, name)
 			icon  = iconTexture,
 			registerForAnyClick = true,
 			notCheckable = true,
-			func = function(_,_,_,_,button)
-				if button == 'RightButton' or addon.plugin then
-					addon:ShowMenu()
-				else
-					UpdateFrameVisibility()
-				end
-			end,
+			func = function(_,_,_,_,button) MinimapButtonMouseClick(button) end,
 		})
 	end
 	-- minimap icon
@@ -1455,28 +1550,8 @@ addon:SetScript("OnEvent", function(frame, event, name)
 		type  = "launcher",
 		label = GetAddOnInfo( addonName, "Title"),
 		icon  = iconTexture,
-		OnClick = function(self, button)
-			if button == 'RightButton' or addon.plugin then
-				addon:ShowMenu()
-			else
-				UpdateFrameVisibility()
-			end
-		end,
-		OnTooltipShow = function(tooltip)
-			tooltip:AddDoubleLine("KiwiFarm", versionStr)
-			if session.startTime or session.duration then
-				local total, hourly, cash, quests, items, hh, mm = GetSessionGeneralStats()
-				local cc = session.startTime and '|cFF00ff00' or '|cFFff8000'
-				local ss = hh>0 and format("%s%dh %dm|r",cc,hh,mm) or format("%s%dm|r",cc,mm)
-				tooltip:AddDoubleLine(L["Session:"],    ss, 1,1,1)
-				tooltip:AddDoubleLine(L["Gold quests:"], FmtMoney(quests),  1,1,1, 1,1,1)
-				tooltip:AddDoubleLine(L["Gold cash:"],  FmtMoney(cash),   1,1,1, 1,1,1)
-				tooltip:AddDoubleLine(L["Gold items:"], FmtMoney(items),  1,1,1, 1,1,1)
-				tooltip:AddDoubleLine(L["Gold/hour:"],  FmtMoney(hourly), 1,1,1, 1,1,1)
-				tooltip:AddDoubleLine(L["Gold total:"], FmtMoney(total),  1,1,1, 1,1,1)
-			end
-			tooltip:AddLine(L["|cFFff4040Left Click|r toggle visibility\n|cFFff4040Right Click|r open menu"], 0.2, 1, 0.2)
-		end,
+		OnClick = function(_, button) MinimapButtonMouseClick(button) end,
+		OnTooltipShow = MinimapButtonTooltipShow,
 	}) , config.minimapIcon)
 	-- events
 	addon:SetScript('OnEvent', function(self,event,...) self[event](self,event,...) end)
@@ -1487,80 +1562,11 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	addon:RegisterEvent("PLAYER_ENTERING_WORLD")
 	addon:RegisterEvent("CHAT_MSG_SYSTEM")
 	addon:RegisterEvent("PLAYER_LOGOUT")
-	-- frame strata
-	RestoreStrata()
-	-- frame position
-	RestorePosition()
-	-- frame size & appearance
-	LayoutFrame()
-	-- session
-	SessionRecover()
-	-- mainframe initial visibility
-	if not addon:SetupPlugin(iconTexture, "1.0", "Gold farm tracking.", "MiCHaEL") then
-		addon:SetMovable(true)
-		addon:RegisterForDrag("LeftButton")
-		addon:SetScript("OnDragStart", addon.StartMoving)
-		addon:SetScript("OnDragStop", function(self)
-			self:StopMovingOrSizing()
-			self:SetUserPlaced(false)
-			SavePosition()
-			RestorePosition()
-		end )
-		addon:SetShown( config.visible and (not config.farmZones or config.reloadUI) )
+	-- mainframe setup
+	if not SetupPluginFrame() then
+		SetupStandaloneFrame()
 	end
 end)
-
--- ============================================================================
--- details plugin
--- ============================================================================
-
-function addon:SetupPlugin()
-	self.SetupPlugin = nil
-	if not config.details then return end
-	local Details = _G.Details
-	if not Details then print(string.format("%s warning: this addon is configured as a Details plugin but Details addon is not installed!", self:GetName())); return; end
-	local Plugin = Details:NewPluginObject("Details_"..self:GetName())
-	Plugin:SetPluginDescription( C_AddOns.GetAddOnMetadata("KiwiFarm", "Notes") )
-	self.plugin = Plugin
-	Plugin.OnDetailsEvent = function(self, event, ...)
-		local instance = self:GetPluginInstance()
-		if instance and (event == "SHOW" or instance == select(1,...)) then
-			self.Frame:SetSize(instance:GetSize())
-			addon.instance = instance
-			addon:SetFrameLevel(5)
-			LayoutFrame()
-		end
-	end
-	UpdateFrameSize = function(self)
-		local _, h = self.instance:GetSize()
-		local th = h-config.frameMargin*2
-		textl:SetHeight(th)
-		textr:SetHeight(th)
-		self:SetAlpha(1)
-	end
-	addon:SetScript("OnMouseUp", function(self, button)
-		if button == 'RightButton' and not IsShiftKeyDown() then
-			self.instance.windowSwitchButton:GetScript("OnMouseDown")(self.instance.windowSwitchButton, button)
-		elseif button == 'LeftButton' and IsShiftKeyDown() then
-			ResetInstances()
-		else
-			self:ShowMenu()
-		end
-	end)
-	Details:InstallPlugin("RAID", 'KiwiFarm', iconTexture, Plugin, "DETAILS_PLUGIN_KIWIFARM", 1, C_AddOns.GetAddOnMetadata("KiwiFarm", "Author"), versionStr)
-	Details:RegisterEvent(Plugin, "DETAILS_INSTANCE_ENDRESIZE")
-	Details:RegisterEvent(Plugin, "DETAILS_INSTANCE_SIZECHANGED")
-	Details:RegisterEvent(Plugin, "DETAILS_INSTANCE_STARTSTRETCH")
-	Details:RegisterEvent(Plugin, "DETAILS_INSTANCE_ENDSTRETCH")
-	Details:RegisterEvent(Plugin, "DETAILS_OPTIONS_MODIFIED")
-	-- reparent frame to details frame
-	self:Hide()
-	self:SetParent(Plugin.Frame)
-	self:ClearAllPoints()
-	self:SetAllPoints()
-	self:Show()
-	return true
-end
 
 -- ============================================================================
 -- config cmdline
@@ -2528,8 +2534,8 @@ do
 				{ text = L['Default (14)'], value =  0,  notCheckable= true, keepShownOnClick=1, func = SetFontSize },
 			} },
 			{ text = L['Text Font'], notCheckable= true, hasArrow = true, menuList = menuFonts },
-			{ text = L['Border Texture'], notCheckable= true, hasArrow = true, menuList = menuBorderTextures },
-			{ text =L['Border color '], notCheckable = true, hasColorSwatch = true, hasOpacity = true,
+			{ text = L['Border Texture'], hidden = isPlugin, notCheckable= true, hasArrow = true, menuList = menuBorderTextures },
+			{ text =L['Border color '], hidden = isPlugin, notCheckable = true, hasColorSwatch = true, hasOpacity = true,
 				get = function() return unpack(config.borderColor) end,
 				set = function(info, ...) config.borderColor = {...}; SetBackground(); end,
 			},
@@ -2571,8 +2577,8 @@ do
 			{ text = L['Details Plugin'], isNotRadio = true, keepShownOnClick = 1, checked = function() return config.details end,
 					func = function()
 						local msg = config.details and
-									L["KiwiFarm info will be displayed in a standalone window. Are you sure you want to disable KiwiFarm Details Plugin?"] or
-						            L["KiwiFarm info will be displayed in a Details window. Are you sure you want to enable KiwiFarm Details Plugin?"]
+									L["KiwiFarm stats will be displayed in a standalone window. Are you sure you want to disable KiwiFarm Details Plugin?"] or
+						            L["KiwiFarm stats will be displayed in a Details window. Are you sure you want to enable KiwiFarm Details Plugin?"]
 						addon:ConfirmDialog( msg, function() config.details = not config.details or nil; ReloadUI(); end)
 					end,
 			},
