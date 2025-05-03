@@ -131,3 +131,10 @@ L['Notification Channels'] = 'Canales de Notificación'
 L['Set other ...'] = 'Elegir otra ...'
 L['Other: '] = 'Otra: '
 L['|cFF7FFF72KiwiFarm|r\nChange the MSBT/Parrot2 Scroll Area name to display KiwiFarm notifications. You can leave the field blank to use the default value.'] = '|cFF7FFF72KiwiFarm|r\nCambia el area de scroll de MSBT/Parrot2 donde mostrar las notificaciones de KiwiFarm. Deja el campo en blanco para usar el valor predeterminado.'
+
+L['Session Control'] = 'Control de sesión'
+L['Start/Resume session on Login'] = 'Iniciar/Continuar sesión al Entrar'
+L['Finish session on Logout'] = 'Finalizar sesión a Salir'
+L['Start session on entering Zones'] = 'Iniciar sesión al entrar en zonas'
+
+L['System'] = 'Sistema'
