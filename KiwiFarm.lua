@@ -1259,6 +1259,10 @@ end
 
 -- looted gold
 do
+	-- This code fails if cupper or silver is missing in the msg, for example:
+	-- "20 gold 10 cupper" is detected as "20 silver 10 cupper", "30 gold" / "30 silver" are detected as "30 cupper"
+	-- As a non perfect a workaround: if first value>=100 then we assume it is gold.
+	-- TODO look a way to fix this: the code should work with any language client.
 	local pattern = GetLocale()=='ruRU' and '%d+ ' or '%d+' -- space added for russian language because there are a |4 prefix in copper/silver/gold russian text
 	local digits = {}
 	local func = function(n) digits[#digits+1]=tonumber(n) end
@@ -1267,6 +1271,9 @@ do
 			wipe(digits)
 			gsub(msg,pattern,func)
 			local money = digits[#digits] + (digits[#digits-1] or 0)*100 + (digits[#digits-2] or 0)*10000
+			if #digits<3 and digits[1]>=100 then
+				money = money * (#digits==1 and 10000 or 100)
+			end
 			session.moneyCash = session.moneyCash + money
 			-- register zone if necessary
 			if not session.zoneName then
