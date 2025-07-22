@@ -1259,21 +1259,15 @@ end
 
 -- looted gold
 do
-	-- This code fails if cupper or silver is missing in the msg, for example:
-	-- "20 gold 10 cupper" is detected as "20 silver 10 cupper", "30 gold" / "30 silver" are detected as "30 cupper"
-	-- As a non perfect a workaround: if first value>=100 then we assume it is gold.
-	-- TODO look a way to fix this: the code should work with any language client.
-	local pattern = GetLocale()=='ruRU' and '%d+ ' or '%d+' -- space added for russian language because there are a |4 prefix in copper/silver/gold russian text
-	local digits = {}
-	local func = function(n) digits[#digits+1]=tonumber(n) end
+	local GOLD_PTN = gsub(_G.GOLD_AMOUNT, "%%d", "(%1+)")
+	local SILV_PTN = gsub(_G.SILVER_AMOUNT, "%%d", "(%1+)")
+	local COPP_PTN = gsub(_G.COPPER_AMOUNT, "%%d", "(%1+)")
 	function addon:CHAT_MSG_MONEY(event,msg)
 		if session.startTime then
-			wipe(digits)
-			gsub(msg,pattern,func)
-			local money = digits[#digits] + (digits[#digits-1] or 0)*100 + (digits[#digits-2] or 0)*10000
-			if #digits<3 and digits[1]>=100 then
-				money = money * (#digits==1 and 10000 or 100)
-			end
+			local g = strmatch(msg, GOLD_PTN) or 0
+			local s = strmatch(msg, SILV_PTN) or 0
+			local c = strmatch(msg, COPP_PTN) or 0
+			local money = g*10000 + s*100 + c
 			session.moneyCash = session.moneyCash + money
 			-- register zone if necessary
 			if not session.zoneName then
