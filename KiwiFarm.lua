@@ -461,14 +461,14 @@ do
 
 	function addon:ShowDialog(message, textDefault, funcAccept, funcCancel, textAccept, textCancel)
 		local t = StaticPopupDialogs["KIWIFARM_DIALOG"]
-		t.OnShow = function (self) if textDefault then self.editBox:SetText(textDefault) end; self:SetFrameStrata("TOOLTIP") end
+		t.OnShow = function (self) if textDefault then (self.editBox or self:GetEditBox()):SetText(textDefault) end; self:SetFrameStrata("TOOLTIP") end
 		t.OnHide = function(self) self:SetFrameStrata("DIALOG")	end
 		t.hasEditBox = textDefault and true or nil
 		t.text = message
 		t.button1 = funcAccept and (textAccept or ACCEPT) or nil
 		t.button2 = funcCancel and (textCancel or CANCEL) or nil
 		t.OnCancel = funcCancel
-		t.OnAccept = funcAccept and function (self)	funcAccept( textDefault and self.editBox:GetText() ) end or nil
+		t.OnAccept = funcAccept and function (self) funcAccept( textDefault and (self.editBox or self:GetEditBox()):GetText() ) end or nil
 		StaticPopup_Show ("KIWIFARM_DIALOG")
 	end
 
