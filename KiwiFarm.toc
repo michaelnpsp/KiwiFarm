@@ -4,7 +4,7 @@
 ## Interface-BCC: 20504
 ## Interface-Wrath: 30403
 ## Interface-Cata: 40402
-## Interface-Mists: 50500
+## Interface-Mists: 50501
 ## Title: |cFF7FFF72Kiwi|r Farm
 ## Notes: Reset & Gold Tracker
 ## Author: MiCHaeL
