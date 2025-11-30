@@ -15,6 +15,7 @@ local VERSION = select(4,GetBuildInfo())
 local VANILA  = VERSION<30000
 local CLASSIC = VERSION<90000
 local RETAIL  = VERSION>=90000
+local SECRETS = (issecretvalue~=nil)
 
 -- addon version
 local GetAddOnInfo = C_AddOns and C_AddOns.GetAddOnInfo or GetAddOnInfo
@@ -1558,11 +1559,14 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	addon:SetScript('OnEvent', function(self,event,...) self[event](self,event,...) end)
 	addon:RegisterEvent("PLAYER_REGEN_DISABLED")
 	addon:RegisterEvent("PLAYER_REGEN_ENABLED")
-	addon:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
 	addon:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 	addon:RegisterEvent("PLAYER_ENTERING_WORLD")
 	addon:RegisterEvent("CHAT_MSG_SYSTEM")
 	addon:RegisterEvent("PLAYER_LOGOUT")
+	if not SECRETS then
+		addon:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+	end
+
 	-- mainframe setup
 	if not SetupPluginFrame() then
 		SetupStandaloneFrame()
