@@ -1385,7 +1385,7 @@ do
 		SPELL_PERIODIC_DAMAGE = true,
 		SPELL_BUILDING_DAMAGE = true,
 	}
-	function addon:COMBAT_LOG_EVENT_UNFILTERED()
+	function addon:COMBAT_LOG_EVENT_UNFILTERED() -- classic
 		local _, eventType,_,srcGUID,srcName,_,_,dstGUID,dstName,dstFlags = CombatLogGetCurrentEventInfo()
 		if Events[eventType] then
 			if eventType == 'UNIT_DIED' then
@@ -1403,6 +1403,17 @@ do
 			elseif srcGUID==playerGUID and enemyGUIDS[dstGUID]==nil and band(dstFlags,COMBATLOG_OBJECT_TYPE_NPC) then
 				enemyGUIDS[dstGUID] = true
 			end
+		end
+	end
+	function addon:UNIT_DIED(_, dstGUID) -- for midnight
+		if inInstance and not resets[curZoneName] and IsDungeon() then
+			LockAddInstance(curZoneName) -- register used instance
+			timer:Play()
+		end
+		if session.startTime then -- and inInstance then
+			session.countMobs = session.countMobs + 1
+			combatCurKills = (combatCurKills or 0) + 1
+			if not session.zoneName then session.zoneName = curZoneName end
 		end
 	end
 end
@@ -1563,10 +1574,11 @@ addon:SetScript("OnEvent", function(frame, event, name)
 	addon:RegisterEvent("PLAYER_ENTERING_WORLD")
 	addon:RegisterEvent("CHAT_MSG_SYSTEM")
 	addon:RegisterEvent("PLAYER_LOGOUT")
-	if not SECRETS then
+	if SECRETS then
+		addon:RegisterEvent('UNIT_DIED')
+	else
 		addon:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
 	end
-
 	-- mainframe setup
 	if not SetupPluginFrame() then
 		SetupStandaloneFrame()
