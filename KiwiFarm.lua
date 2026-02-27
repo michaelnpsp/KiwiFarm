@@ -46,6 +46,7 @@ local MAX_PLAYER_LEVEL_TABLE = {
 	[8] = 60,  -- ShadowLands
 	[9] = 70,  -- Dragonflight
 	[10] = 80, -- TWW
+	[11] = 90, -- Midnight
 }
 local isPlayerLeveling
 do
