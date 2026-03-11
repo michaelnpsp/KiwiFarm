@@ -15,7 +15,11 @@ local VERSION = select(4,GetBuildInfo())
 local VANILA  = VERSION<30000
 local CLASSIC = VERSION<90000
 local RETAIL  = VERSION>=90000
+
+-- midnight stuff
 local SECRETS = (issecretvalue~=nil)
+local issecretvalue = issecretvalue or function() return false end
+local canaccessvalue = canaccessvalue or function() return true end
 
 -- addon version
 local GetAddOnInfo = C_AddOns and C_AddOns.GetAddOnInfo or GetAddOnInfo
@@ -1197,13 +1201,15 @@ end)
 local PATTERN_RESET = '^'..INSTANCE_RESET_SUCCESS:gsub("([^%w])","%%%1"):gsub('%%%%s','(.+)')..'$'
 local PATTERN_RESET_FAILED = '^'..INSTANCE_RESET_FAILED:gsub("([^%w])","%%%1"):gsub('%%%%s','(.+)')..'$'
 function addon:CHAT_MSG_SYSTEM(event,msg)
-	local zone = strmatch(msg,PATTERN_RESET) or ( VANILA and strmatch(msg,PATTERN_RESET_FAILED) )
-	if zone then
-		LockAddReset(zone)
-		if addon:IsVisible() then
-			RefreshText()
+	if canaccessvalue(msg) then
+		local zone = strmatch(msg,PATTERN_RESET) or ( VANILA and strmatch(msg,PATTERN_RESET_FAILED) )
+		if zone then
+			LockAddReset(zone)
+			if addon:IsVisible() then
+				RefreshText()
+			end
+			SendMessageToHomeGroup()
 		end
-		SendMessageToHomeGroup()
 	end
 end
 
@@ -1224,7 +1230,7 @@ do
 		end
 	end
 	function addon:CHAT_MSG_LOOT(event,msg)
-		if session.startTime then
+		if session.startTime and canaccessvalue(msg) then
 			local itemLink, quantity = GetItemInfoFromMsg(msg)
 			if itemLink then
 				local price, rarity, itemName = GetItemPrice(itemLink)
@@ -1265,7 +1271,7 @@ do
 	local SILV_PTN = gsub(_G.SILVER_AMOUNT, "%%d", "(%1+)")
 	local COPP_PTN = gsub(_G.COPPER_AMOUNT, "%%d", "(%1+)")
 	function addon:CHAT_MSG_MONEY(event,msg)
-		if session.startTime then
+		if session.startTime and canaccessvalue(msg) then
 			local g = strmatch(msg, GOLD_PTN) or 0
 			local s = strmatch(msg, SILV_PTN) or 0
 			local c = strmatch(msg, COPP_PTN) or 0
@@ -1285,7 +1291,7 @@ end
 
 -- gold awarded in quests
 function addon:QUEST_TURNED_IN(event,_,_,money)
-	if disabled.quests then return end
+	if disabled.quests or issecretvalue(money) then return end
 	session.moneyQuests = session.moneyQuests + money
 	-- register zone if necessary
 	if not session.zoneName then
@@ -1407,14 +1413,16 @@ do
 		end
 	end
 	function addon:UNIT_DIED(_, dstGUID) -- for midnight
-		if inInstance and not resets[curZoneName] and IsDungeon() then
-			LockAddInstance(curZoneName) -- register used instance
-			timer:Play()
-		end
-		if session.startTime then -- and inInstance then
-			session.countMobs = session.countMobs + 1
-			combatCurKills = (combatCurKills or 0) + 1
-			if not session.zoneName then session.zoneName = curZoneName end
+		if issecretvalue(dstGUID) then -- enemy unit if guid is secret
+			if inInstance and not resets[curZoneName] and IsDungeon() then
+				LockAddInstance(curZoneName) -- register used instance
+				timer:Play()
+			end
+			if session.startTime then -- and inInstance then
+				session.countMobs = session.countMobs + 1
+				combatCurKills = (combatCurKills or 0) + 1
+				if not session.zoneName then session.zoneName = curZoneName end
+			end
 		end
 	end
 end
