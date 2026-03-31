@@ -678,13 +678,15 @@ do
 		InitAuctionator()
 		GetItemPrice = function(itemLink)
 			local itemID = tonumber(strmatch(itemLink, "item:(%d+):"))
-			local name, _, rarity, _, _, _, _, _, _, _, vendorPrice, class, subClass = GetItemInfo(itemLink)
-			if not (config.ignoreEnchantingMats and IsEnchantingMat(itemID, class, subClass)) then
-				local price, sources = 0, config.priceByItem[itemLink] or config.priceByQuality[rarity or 0] or {}
-				for src, user in pairs(sources) do
-					price = max( price, GetValue(src, itemLink, itemID, name, class, rarity, vendorPrice, user) )
+			if itemID~=nil then
+				local name, _, rarity, _, _, _, _, _, _, _, vendorPrice, class, subClass = GetItemInfo(itemLink)
+				if not (config.ignoreEnchantingMats and IsEnchantingMat(itemID, class, subClass)) then
+					local price, sources = 0, config.priceByItem[itemLink] or config.priceByQuality[rarity or 0] or {}
+					for src, user in pairs(sources) do
+						price = max( price, GetValue(src, itemLink, itemID, name, class, rarity, vendorPrice, user) )
+					end
+					return price, rarity, name
 				end
-				return price, rarity, name
 			end
 		end
 		return GetItemPrice(itemLink)
