@@ -1033,6 +1033,18 @@ local function SessionToggleFinish()
 	end
 end
 
+-- remove all stats data
+local function StatsWipeAll(confirm)
+	if confirm then
+		addon:ConfirmDialog( L["Are you sure you want wipe all statistics ?"], StatsWipeAll )
+		return
+	end
+	SessionFinish()
+	wipe(config.zone)
+	wipe(config.daily)
+	InitDB(config.total, DEFDATA, true)
+end
+
 -- leveling reset xp info
 local function LevelingReset()
 	leveling.startTime  = time()-1
@@ -1632,6 +1644,8 @@ SlashCmdList.KIWIFARM = function(args)
 		else
 			LibStub("LibDBIcon-1.0"):Show(addonName)
 		end
+	elseif arg1 == 'wipestats' then
+		StatsWipeAll( arg2 ~= 'force')
 	else
 		print("Kiwi Farm:")
 		print("  Right-Click to display config menu.")
@@ -1649,6 +1663,7 @@ SlashCmdList.KIWIFARM = function(args)
  		print("  /kfarm config      -- display config menu")
 		print("  /kfarm minimap     -- toggle minimap icon visibility")
 		print("  /kfarm resetpos    -- reset main window position")
+		print("  /kfarm wipestats [force] -- wipe all statistics")
 	end
 end
 
@@ -2593,6 +2608,9 @@ do
 				{ text = '999|cffffd70ag|r', 								 value = '%d|cffffd70ag|r', 				checked = MoneyFmtChecked, func = SetMoneyFmt },
 			} },
 			{ text = L['Data Collection'], notCheckable= true, hasArrow = true, menuList = menuCollect },
+			{ text = L['Data Maintenance'], notCheckable = true, hasArrow = true, menuList = {
+				{ text = L['Wipe All Data!!!'], notCheckable = true, func = function() StatsWipeAll(true) end },
+			} },
 			{ text = L['Reset Notification'],   notCheckable = true, hasArrow = true, menuList = menuResetNotify },
 			{ text = GetNotifyAreaTitle, notCheckable = true, hasArrow = true, menuList = {
 				{ text = 'Notification', value = 'Notification', checked = NotifyAreaChecked, func = SetNotifyArea },
