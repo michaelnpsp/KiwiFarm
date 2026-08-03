@@ -17,7 +17,7 @@ local CLASSIC = VERSION<90000
 local RETAIL  = VERSION>=90000
 
 -- midnight stuff
-local SECRETS = (issecretvalue~=nil)
+local SECRETS = VERSION>=120000
 local issecretvalue = issecretvalue or function() return false end
 local canaccessvalue = canaccessvalue or function() return true end
 
