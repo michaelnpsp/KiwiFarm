@@ -15,9 +15,11 @@ local VERSION = select(4,GetBuildInfo())
 local VANILA  = VERSION<30000
 local CLASSIC = VERSION<90000
 local RETAIL  = VERSION>=90000
+local MIDNIGHT = VERSION>=120000
+local FOREVER = VERSION>=16000 and VERSION<20000
 
 -- midnight stuff
-local SECRETS = VERSION>=120000
+local SECRETS = MIDNIGHT or FOREVER
 local issecretvalue = issecretvalue or function() return false end
 local canaccessvalue = canaccessvalue or function() return true end
 
